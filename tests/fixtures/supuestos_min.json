@@ -1,0 +1,8 @@
+{
+  "clients": [
+    {"code": "A.ESPARZA", "name_original": "A.ESPARZA", "address_original": "Calle Ficticia 1, Torreon, Coahuila", "latitude": 25.5, "longitude": -103.4, "coordinate_status": "synthetic_unverified", "coordinate_source": "fixture", "is_real_customer_location": false, "demand_kg": null, "active_order": false, "review_required": false},
+    {"code": "ABEL", "name_original": "ABEL", "address_original": "Otra Ciudad", "latitude": 25.5, "longitude": -103.4, "coordinate_status": "synthetic_unverified", "coordinate_source": "fixture", "is_real_customer_location": false, "demand_kg": null, "active_order": false, "review_required": false},
+    {"code": "ADRIANA", "name_original": "ADRIANA", "address_original": "NULL", "latitude": 25.5, "longitude": -103.4, "coordinate_status": "synthetic_unverified", "coordinate_source": "fixture", "is_real_customer_location": false, "demand_kg": null, "active_order": false, "review_required": false},
+    {"code": "BODEGA", "name_original": "BODEGA", "address_original": "BODEGA", "latitude": 25.5, "longitude": -103.4, "coordinate_status": "synthetic_unverified", "coordinate_source": "fixture", "is_real_customer_location": false, "demand_kg": null, "active_order": false, "review_required": true}
+  ]
+}
