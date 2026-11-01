@@ -5,3 +5,4 @@ __pycache__/
 .superpowers/
 data/hcvrp_supuestos_v01.json
 data/clients_laguna.json
+data/hcvrp.db
