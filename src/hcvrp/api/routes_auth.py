@@ -22,9 +22,15 @@ def login(
     body: LoginIn, request: Request, response: Response, conn: sqlite3.Connection = Depends(get_conn)
 ) -> dict[str, str]:
     settings = request.app.state.settings
+    guard = request.app.state.login_guard
+    key = (body.username, request.client.host if request.client else "")
+    if guard.is_blocked(key):
+        raise HTTPException(status_code=429, detail="demasiados intentos; espera 15 minutos")
     token = auth.login(conn, body.username, body.password, settings.session_days)
     if token is None:
+        guard.record_failure(key)
         raise HTTPException(status_code=401, detail="usuario o contraseña incorrectos")
+    guard.clear(key)
     response.set_cookie(
         COOKIE_NAME, token,
         max_age=settings.session_days * 86_400,

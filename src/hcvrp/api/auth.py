@@ -8,6 +8,8 @@ import hmac
 import secrets
 import sqlite3
 import sys
+import threading
+import time
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +21,33 @@ from hcvrp.api.settings import Settings
 
 COOKIE_NAME = "hcvrp_session"
 _N, _R, _P = 2**14, 8, 1
+
+
+class LoginGuard:
+    """Frena intentos repetidos por (usuario, IP). Vive en memoria: se limpia al reiniciar."""
+
+    def __init__(self, max_failures: int = 5, block_s: float = 900):
+        self.max_failures = max_failures
+        self.block_s = block_s
+        self._failures: dict[tuple[str, str], tuple[int, float]] = {}
+        self._lock = threading.Lock()
+
+    def is_blocked(self, key: tuple[str, str]) -> bool:
+        with self._lock:
+            count, since = self._failures.get(key, (0, 0.0))
+            if time.monotonic() - since >= self.block_s:
+                self._failures.pop(key, None)
+                return False
+            return count >= self.max_failures
+
+    def record_failure(self, key: tuple[str, str]) -> None:
+        with self._lock:
+            count, _ = self._failures.get(key, (0, 0.0))
+            self._failures[key] = (count + 1, time.monotonic())
+
+    def clear(self, key: tuple[str, str]) -> None:
+        with self._lock:
+            self._failures.pop(key, None)
 
 
 def _scrypt(pw: str, salt: bytes) -> bytes:

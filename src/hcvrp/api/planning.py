@@ -16,6 +16,7 @@ from hcvrp.api.db import connect
 from hcvrp.api.schemas import GeometryFn, plan_out
 from hcvrp.api.settings import Settings
 from hcvrp.baseline import baseline_plan, compare, served_kg
+from hcvrp.cli import REASONS_ES
 from hcvrp.domain import DEPOT, Location, Problem
 from hcvrp.geo.cache import CachedProvider
 from hcvrp.geo.directions import OrsDirections, straight_line
@@ -37,12 +38,19 @@ class PlanningError(Exception):
     pass
 
 
-def _in_spanish(message: str) -> str:
+def _in_spanish(message: str, problem: Problem) -> str:
     for pattern, text in _LOCK_MESSAGES:
         match = re.search(pattern, message)
         if match:
             return text.format(*match.groups())
-    return message
+    names = {o.order_id: problem.clients[o.client_code].name for o in problem.orders}
+    message = re.sub(
+        r"el pedido '([^']+)'", lambda m: f"el pedido de {names.get(m[1], m[1])}", message
+    )
+    message = re.sub(r"camión '([^']+)'", r"camión \1", message)
+    for reason, label in REASONS_ES.items():
+        message = message.replace(f"({reason})", f"({label})")
+    return message.replace("bloqueo infeasible", "bloqueo imposible")
 
 
 def build_problem(conn: sqlite3.Connection, day: date) -> Problem:
@@ -56,9 +64,10 @@ def build_problem(conn: sqlite3.Connection, day: date) -> Problem:
     )
 
 
-def inputs_hash(problem: Problem) -> str:
+def inputs_hash(problem: Problem, provider: str = "haversine") -> str:
     with_orders = sorted({o.client_code for o in problem.orders})
     payload = {
+        "provider": provider,
         "depot": dataclasses.asdict(problem.depot),
         "clients": [dataclasses.asdict(problem.clients[code]) for code in with_orders],
         "vehicles": [dataclasses.asdict(v) for v in problem.vehicles],
@@ -82,7 +91,7 @@ def run_planning(problem: Problem, provider: DistanceProvider, geometry: Geometr
             if served_kg(plan) == served_kg(free):
                 lock_cost_diff = max(lock_cost_diff, 0.0)
     except ValueError as e:
-        raise PlanningError(_in_spanish(str(e))) from e
+        raise PlanningError(_in_spanish(str(e), problem)) from e
     comparison = compare(plan, baseline, problem)
     return plan_out(problem, plan, baseline, comparison, lock_cost_diff, geometry).model_dump(mode="json")
 
@@ -197,7 +206,8 @@ class Recalculator:
             problem = build_problem(conn, day)
             if not problem.orders:
                 return
-            current = inputs_hash(problem)
+            provider = self.settings.provider
+            current = inputs_hash(problem, provider)
             row = store.get_plan_row(conn, day)
             if not forced and row is not None and row["inputs_hash"] == current:
                 return
@@ -209,7 +219,7 @@ class Recalculator:
             except Exception:
                 logger.exception("error interno al calcular el plan del %s", day)
                 error = "error interno al calcular el plan"
-            if inputs_hash(build_problem(conn, day)) != current:
+            if inputs_hash(build_problem(conn, day), provider) != current:
                 self.request(day)
             elif error is not None:
                 store.save_plan_error(conn, day, current, error)
