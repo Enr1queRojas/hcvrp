@@ -49,12 +49,15 @@ desde la raíz del repositorio.
 | Variable | Por defecto | Para qué |
 |---|---|---|
 | `HCVRP_DB` | `data/hcvrp.db` | Ruta de la base de datos |
-| `HCVRP_PROVIDER` | `haversine` | `ors` usa distancias y trazos reales por calles |
-| `ORS_API_KEY` | | Clave de OpenRouteService, necesaria con `ors` |
+| `ORS_API` o `ORS_API_KEY` | | Clave de OpenRouteService |
+| `HCVRP_PROVIDER` | `ors` si hay clave; si no, `haversine` | `ors` usa distancias y trazos reales por calles |
 | `HCVRP_COOKIE_SECURE` | apagado | Ponla en `1` cuando se sirva por HTTPS |
 | `HCVRP_DEBOUNCE_S` | `1.5` | Espera para agrupar cambios antes de recalcular |
 | `HCVRP_WEB_DIST` | `web/dist` | Carpeta de la web compilada |
 | `HCVRP_HOST`, `PORT` | `127.0.0.1`, `8000` | Dirección del servidor |
+
+Estas variables también se pueden poner en un archivo `.env` en la raíz, que se
+carga al arrancar. Está en `.gitignore`: nunca lo subas al repositorio.
 
 Con `haversine` las distancias son línea recta por un factor de rodeo y la app lo
 avisa. Con `ors`, ajusta las ubicaciones sin verificar a la vía más cercana con

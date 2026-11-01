@@ -8,3 +8,4 @@ data/clients_laguna.json
 data/hcvrp.db
 web/node_modules/
 web/dist/
+.env

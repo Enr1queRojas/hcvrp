@@ -1,5 +1,7 @@
 from datetime import date
 
+import json
+
 import httpx
 import pytest
 
@@ -67,6 +69,7 @@ def test_ors_directions_uses_cache(tmp_path):
 
 def test_ors_directions_without_key_fails_only_when_called(tmp_path, monkeypatch):
     monkeypatch.delenv("ORS_API_KEY", raising=False)
+    monkeypatch.delenv("ORS_API", raising=False)
     d = OrsDirections(cache_dir=tmp_path)
     with pytest.raises(RuntimeError, match="Falta ORS_API_KEY"):
         d([Location(2, 1), Location(4, 3)])
@@ -86,6 +89,7 @@ def test_app_trips_carry_geometry(client):
 
 def test_snap_without_key_exits_1(tmp_path, clients_file, monkeypatch, capsys):
     monkeypatch.delenv("ORS_API_KEY", raising=False)
+    monkeypatch.delenv("ORS_API", raising=False)
     code = seed.main(["--clients", str(clients_file), "--db", str(tmp_path / "s.db"), "--snap"])
     assert code == 1 and "Falta ORS_API_KEY" in capsys.readouterr().err
 
@@ -111,3 +115,16 @@ def test_snap_moves_only_unverified(tmp_path, clients_file, monkeypatch):
     assert get_client(conn, "BETO").location == before["BETO"].location
     assert get_client(conn, "ADAN").location == Location(25.5, -103.5)
     assert get_client(conn, "ADAN").location_status == before["ADAN"].location_status
+
+
+def test_ors_directions_searches_roads_like_the_matrix(tmp_path):
+    # Sin radiuses, ORS responde 404 si la calle está a más de 350 m, aunque la matriz sí resolvió el punto.
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"features": [{"geometry": {"coordinates": [[1, 2], [3, 4]]}}]})
+
+    d = OrsDirections("k", httpx.Client(transport=httpx.MockTransport(handler)), tmp_path)
+    d([Location(2, 1), Location(4, 3), Location(2, 1)])
+    assert bodies[0]["radiuses"] == [-1, -1, -1]

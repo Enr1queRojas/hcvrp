@@ -13,7 +13,7 @@ BASE = "https://api.openrouteservice.org/v2"
 
 class OrsProvider:
     def __init__(self, api_key: str | None = None, client: httpx.Client | None = None):
-        self.api_key = api_key or os.environ.get("ORS_API_KEY")
+        self.api_key = api_key or os.environ.get("ORS_API_KEY") or os.environ.get("ORS_API")
         if not self.api_key:
             raise RuntimeError("Falta ORS_API_KEY")
         self.client = client or httpx.Client(timeout=60)

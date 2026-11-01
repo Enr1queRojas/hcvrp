@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 from datetime import date
 
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from hcvrp.api.app import create_app
 from hcvrp.api.db import connect
 from hcvrp.api.planning import PlanningError, build_problem, inputs_hash, run_planning
+from hcvrp.api.settings import Settings, load_env
 from hcvrp.api.store import add_order, set_lock
 from hcvrp.domain import DEPOT
 from hcvrp.geo.matrix import HaversineProvider
@@ -92,3 +94,34 @@ def test_no_dist_means_api_only(settings, tmp_path):
     with TestClient(create_app(replace(settings, web_dist=tmp_path / "no-existe"))) as c:
         assert c.get("/").status_code == 404
         assert c.get("/api/me").status_code == 401
+
+
+def test_load_env_reads_file_without_overriding(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text('\ufeff# comentario\nHCVRP_A=uno\n\nHCVRP_B="dos=2"\nHCVRP_C=del-archivo\nsin igual\n', encoding="utf-8")
+    for name in ("HCVRP_A", "HCVRP_B"):  # definir y quitar: así monkeypatch las restaura al final
+        monkeypatch.setenv(name, "x")
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("HCVRP_C", "de-la-terminal")
+    load_env(env)
+    assert os.environ["HCVRP_A"] == "uno"
+    assert os.environ["HCVRP_B"] == "dos=2"
+    assert os.environ["HCVRP_C"] == "de-la-terminal"
+
+
+def test_load_env_missing_file_is_fine(tmp_path):
+    load_env(tmp_path / "no-existe")
+
+
+@pytest.mark.parametrize("env,expected", [
+    ({}, "haversine"),
+    ({"ORS_API": "k"}, "ors"),
+    ({"ORS_API_KEY": "k"}, "ors"),
+    ({"ORS_API": "k", "HCVRP_PROVIDER": "haversine"}, "haversine"),
+])
+def test_provider_follows_key_unless_chosen(monkeypatch, env, expected):
+    for name in ("ORS_API", "ORS_API_KEY", "HCVRP_PROVIDER"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    assert Settings.from_env().provider == expected
