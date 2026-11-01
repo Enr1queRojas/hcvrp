@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from hcvrp.api import routes_auth, routes_catalog, routes_orders, routes_plan
-from hcvrp.api.planning import Recalculator, make_provider
+from hcvrp.api.planning import Recalculator, make_geometry, make_provider
 from hcvrp.api.settings import Settings
 
 
@@ -37,7 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="HCVRP La Laguna", lifespan=_lifespan)
     app.state.settings = settings
-    app.state.recalc = Recalculator(settings, make_provider(settings))
+    app.state.recalc = Recalculator(settings, make_provider(settings), make_geometry(settings))
     app.state.on_change = app.state.recalc.request
     app.add_exception_handler(RequestValidationError, _validation_error)
     app.include_router(routes_auth.router)

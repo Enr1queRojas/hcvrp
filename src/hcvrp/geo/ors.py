@@ -19,8 +19,16 @@ class OrsProvider:
         self.client = client or httpx.Client(timeout=60)
 
     def _post(self, path: str, body: dict) -> dict:
-        r = self.client.post(f"{BASE}/{path}", json=body, headers={"Authorization": self.api_key})
-        r.raise_for_status()
+        try:
+            r = self.client.post(f"{BASE}/{path}", json=body, headers={"Authorization": self.api_key})
+        except httpx.RequestError as e:
+            raise RuntimeError("no hay conexión con OpenRouteService") from e
+        if r.status_code in (401, 403):
+            raise RuntimeError("la clave de OpenRouteService no es válida")
+        if r.status_code == 429:
+            raise RuntimeError("se alcanzó el límite de consultas de OpenRouteService; intenta en un minuto")
+        if r.is_error:
+            raise RuntimeError(f"OpenRouteService respondió {r.status_code}")
         return r.json()
 
     def matrix(self, points: dict[str, Location]) -> Matrix:

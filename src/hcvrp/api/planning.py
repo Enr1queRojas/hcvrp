@@ -18,6 +18,7 @@ from hcvrp.api.settings import Settings
 from hcvrp.baseline import baseline_plan, compare, served_kg
 from hcvrp.domain import DEPOT, Location, Problem
 from hcvrp.geo.cache import CachedProvider
+from hcvrp.geo.directions import OrsDirections, straight_line
 from hcvrp.geo.matrix import DistanceProvider, HaversineProvider, Matrix
 from hcvrp.geo.ors import OrsProvider
 from hcvrp.solver import solve
@@ -103,6 +104,10 @@ def make_provider(settings: Settings) -> DistanceProvider:
         return CachedProvider(OrsProvider())
     except RuntimeError as e:
         return _MissingKeyProvider(str(e))
+
+
+def make_geometry(settings: Settings) -> GeometryFn:
+    return straight_line if settings.provider == "haversine" else OrsDirections()
 
 
 class Recalculator:

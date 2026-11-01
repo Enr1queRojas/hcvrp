@@ -98,6 +98,20 @@ def test_unexpected_failure_keeps_thread_alive(settings, monkeypatch):
     assert get_plan_row(connect(settings.db_path), DAY)["status"] == "listo"
 
 
+def test_routing_service_error_is_stored(settings):
+    class Down:
+        def matrix(self, points):
+            raise RuntimeError("la clave de OpenRouteService no es válida")
+
+    add_order(connect(settings.db_path), DAY, "AARON", 1000)
+    recalc = Recalculator(settings, Down())
+    recalc.request(DAY)
+    assert recalc.wait_idle(30)
+    recalc.stop()
+    row = get_plan_row(connect(settings.db_path), DAY)
+    assert row["status"] == "error" and row["error"] == "la clave de OpenRouteService no es válida"
+
+
 def test_empty_day_has_no_plan(client):
     assert client.get("/api/plan?date=2030-01-01").json()["status"] == "ninguno"
 

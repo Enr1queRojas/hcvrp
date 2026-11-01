@@ -111,3 +111,24 @@ def test_ors_snap(ors_snap_client):
         {"A": Location(25.54, -103.42), "B": Location(25.0, -103.0)}
     )
     assert r["A"] == Location(25.5402, -103.4201) and r["B"] is None
+
+
+@pytest.mark.parametrize("status,msg", [
+    (401, "clave de OpenRouteService no es válida"),
+    (403, "clave de OpenRouteService no es válida"),
+    (429, "límite de consultas"),
+    (500, "OpenRouteService respondió 500"),
+])
+def test_ors_errors_are_readable(status, msg):
+    p = OrsProvider("k", httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(status))))
+    with pytest.raises(RuntimeError, match=msg):
+        p.matrix({"DEPOT": Location(25.5, -103.4), "A": Location(25.6, -103.3)})
+
+
+def test_ors_network_error_readable():
+    def fail(request):
+        raise httpx.ConnectError("x")
+
+    p = OrsProvider("k", httpx.Client(transport=httpx.MockTransport(fail)))
+    with pytest.raises(RuntimeError, match="no hay conexión"):
+        p.matrix({"DEPOT": Location(25.5, -103.4), "A": Location(25.6, -103.3)})

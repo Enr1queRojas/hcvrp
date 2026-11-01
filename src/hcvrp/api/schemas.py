@@ -1,6 +1,7 @@
 """Modelos de entrada y salida de la API."""
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import date as Date
 from typing import Annotated, Any
@@ -11,7 +12,9 @@ from pydantic import (
 
 from hcvrp.baseline import Comparison, served_kg
 from hcvrp.cli import REASONS_ES
-from hcvrp.domain import Client, Location, LocationStatus, Plan, Problem
+from hcvrp.domain import Client, Location, LocationStatus, Plan, Problem, Trip
+
+logger = logging.getLogger(__name__)
 
 LAGUNA_BOUNDS = (25.30, 25.80, -103.80, -103.10)  # (lat_min, lat_max, lon_min, lon_max)
 MAX_ORDER_KG = 1_000_000
@@ -213,6 +216,18 @@ def _pct(kg: int, capacity_kg: int) -> float:
     return round(100 * kg / capacity_kg, 1)
 
 
+def _trip_geometry(problem: Problem, trip: Trip, geometry: GeometryFn | None) -> list[list[float]]:
+    """Un fallo de geometría deja el viaje sin trazo, pero nunca invalida el plan."""
+    if geometry is None:
+        return []
+    stops = [problem.clients[s.client_code].location for s in trip.stops]
+    try:
+        return geometry([problem.depot, *stops, problem.depot])
+    except Exception as e:
+        logger.warning("sin geometría para un viaje: %s", e)
+        return []
+
+
 def plan_out(
     problem: Problem,
     plan: Plan,
@@ -235,7 +250,7 @@ def plan_out(
                 TripOut(
                     trip_no=t.trip_no, start_min=t.start_min, end_min=t.end_min, km=t.km, kg=t.kg,
                     capacity_pct=_pct(t.kg, capacity),
-                    geometry=[],
+                    geometry=_trip_geometry(problem, t, geometry),
                     stops=[
                         StopOut(
                             order_id=s.order_id, client_code=s.client_code,

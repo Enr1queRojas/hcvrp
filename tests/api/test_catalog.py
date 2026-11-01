@@ -86,3 +86,10 @@ def test_catalog_writes_notify_all_dates(client):
     client.put("/api/fleet", json=client.get("/api/fleet").json())
     client.put("/api/clients/AARON/location", json={"lat": 25.54, "lon": -103.41})
     assert calls == [None, None, None]
+
+
+def test_client_with_orders_can_be_edited_and_located(client):
+    client.post("/api/orders", json={"date": "2026-10-31", "client_code": "AARON", "kg": 1000})
+    assert client.put("/api/clients/AARON/location", json={"lat": 25.54, "lon": -103.41}).status_code == 200
+    assert client.patch("/api/clients/AARON", json={"name": "Otro"}).status_code == 200
+    assert client.get("/api/orders?date=2026-10-31").json()[0]["client_name"] == "Otro"
