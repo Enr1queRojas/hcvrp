@@ -51,7 +51,6 @@ def test_unknown_client_404(client):
     assert client.put("/api/clients/NADIE/location", json={"lat": 25.54, "lon": -103.41}).status_code == 404
 
 
-@pytest.mark.skip(reason="se activa en la Tarea 4")
 def test_delete_client_with_orders_conflict(client):
     client.post("/api/orders", json={"date": "2026-10-31", "client_code": "AARON", "kg": 1000})
     r = client.delete("/api/clients/AARON")

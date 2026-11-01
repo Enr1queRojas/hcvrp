@@ -1,13 +1,17 @@
 """Modelos de entrada y salida de la API."""
 from __future__ import annotations
 
-from typing import Annotated
+from datetime import date as Date
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, model_validator,
+)
 
 from hcvrp.domain import Client
 
 LAGUNA_BOUNDS = (25.30, 25.80, -103.80, -103.10)  # (lat_min, lat_max, lon_min, lon_max)
+MAX_ORDER_KG = 1_000_000
 
 ClientCode = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40, pattern=r"^[^/]+$")
@@ -76,3 +80,41 @@ class ParamsIO(BaseModel):
     reload_minutes: int = Field(ge=0, le=480)
     max_trips_per_vehicle: int = Field(ge=1, le=6)
     time_limit_s: int = Field(ge=1, le=60)
+
+
+def _check_kg(value: Any) -> int:
+    if type(value) is not int or not 1 <= value <= MAX_ORDER_KG:
+        raise ValueError(f"los kg deben ser un número entero entre 1 y {MAX_ORDER_KG}")
+    return value
+
+
+Kg = Annotated[int, BeforeValidator(_check_kg)]
+
+
+class OrderIn(BaseModel):
+    date: Date
+    client_code: str
+    kg: Kg
+
+
+class OrderPatch(BaseModel):
+    kg: Kg
+
+
+class LockIO(BaseModel):
+    vehicle_id: str
+    trip_no: int = Field(ge=1)
+
+
+class OrderOut(BaseModel):
+    id: int
+    date: Date
+    client_code: str
+    client_name: str
+    kg: int
+    lock: LockIO | None
+
+
+class ScenarioIn(BaseModel):
+    date: Date
+    name: str
