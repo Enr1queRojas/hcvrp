@@ -3,6 +3,12 @@
 Planeador de reparto para Graneros Guerra. Para cambiar el logo, reemplaza
 `web/src/assets/logo-graneros-guerra.png` y vuelve a compilar la web.
 
+
+### Arranque
+.venv\Scripts\python -m hcvrp.api.seed --snap
+.venv\Scripts\python -m hcvrp.api.auth add-user ana
+.venv\Scripts\python -m hcvrp.api
+
 A partir de cliente + kilos calcula qué
 camión lleva cada pedido, en qué viaje y en qué orden.
 
