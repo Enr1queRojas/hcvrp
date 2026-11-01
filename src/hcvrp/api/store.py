@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 
 from hcvrp.domain import Client, Location, LocationStatus, Order, Params, Vehicle
 
@@ -161,3 +161,46 @@ def set_lock(conn: sqlite3.Connection, order_id: int, vehicle_id: str, trip_no: 
 def delete_lock(conn: sqlite3.Connection, order_id: int) -> None:
     conn.execute("DELETE FROM locks WHERE order_id = ?", (order_id,))
     conn.commit()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def get_plan_row(conn: sqlite3.Connection, day: date) -> dict | None:
+    row = conn.execute("SELECT * FROM plans WHERE plan_date = ?", (day.isoformat(),)).fetchone()
+    if row is None:
+        return None
+    return {
+        "inputs_hash": row["inputs_hash"],
+        "status": row["status"],
+        "result": None if row["result_json"] is None else json.loads(row["result_json"]),
+        "error": row["error"],
+        "computed_at": row["computed_at"],
+    }
+
+
+def save_plan_result(conn: sqlite3.Connection, day: date, inputs_hash: str, result: dict) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO plans (plan_date, inputs_hash, status, result_json, error, computed_at) "
+        "VALUES (?, ?, 'listo', ?, NULL, ?)",
+        (day.isoformat(), inputs_hash, json.dumps(result), _now()),
+    )
+    conn.commit()
+
+
+def save_plan_error(conn: sqlite3.Connection, day: date, inputs_hash: str, message: str) -> None:
+    """Guarda el error y conserva el último resultado bueno."""
+    conn.execute(
+        "INSERT INTO plans (plan_date, inputs_hash, status, result_json, error, computed_at) "
+        "VALUES (?, ?, 'error', NULL, ?, ?) "
+        "ON CONFLICT (plan_date) DO UPDATE SET inputs_hash = excluded.inputs_hash, "
+        "status = 'error', error = excluded.error, computed_at = excluded.computed_at",
+        (day.isoformat(), inputs_hash, message, _now()),
+    )
+    conn.commit()
+
+
+def dates_with_orders(conn: sqlite3.Connection) -> list[date]:
+    rows = conn.execute("SELECT DISTINCT plan_date FROM orders ORDER BY plan_date").fetchall()
+    return [date.fromisoformat(r["plan_date"]) for r in rows]

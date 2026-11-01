@@ -201,6 +201,14 @@ class PlanOut(BaseModel):
     lock_cost_diff_mxn: float | None
 
 
+class PlanStatusOut(BaseModel):
+    status: str
+    stale: bool
+    error: str | None
+    plan: PlanOut | None
+    computed_at: str | None
+
+
 def _pct(kg: int, capacity_kg: int) -> float:
     return round(100 * kg / capacity_kg, 1)
 
