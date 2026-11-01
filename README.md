@@ -1,6 +1,9 @@
 # HCVRP La Laguna
 
-Planeador del reparto del día siguiente: a partir de cliente + kilos calcula qué
+Planeador de reparto para Graneros Guerra. Para cambiar el logo, reemplaza
+`web/src/assets/logo-graneros-guerra.png` y vuelve a compilar la web.
+
+A partir de cliente + kilos calcula qué
 camión lleva cada pedido, en qué viaje y en qué orden.
 
 ## Instalar

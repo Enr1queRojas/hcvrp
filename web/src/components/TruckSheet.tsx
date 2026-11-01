@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import logo from "../assets/logo-graneros-guerra.png";
 import { hhmm, kg, km } from "../format";
 import type { Client, VehiclePlan } from "../types";
 
@@ -20,6 +21,7 @@ export function TruckSheet({ date, vehicle, clients, onDone }: Props) {
 
   return createPortal(
     <article className="print-sheet">
+      <img src={logo} alt="Graneros Guerra" width={65} height={48} />
       <h1>Camión {vehicle.vehicle_id}</h1>
       <p>Reparto del {date}. Salida a las 09:00 con el viaje 1 ya cargado.</p>
       {vehicle.trips.map((trip) => (

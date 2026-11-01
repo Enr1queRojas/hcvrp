@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, setOnUnauthorized } from "./api";
+import logo from "./assets/logo-graneros-guerra.png";
 import { tomorrowISO } from "./format";
 import { Clients } from "./screens/Clients";
 import { Fleet } from "./screens/Fleet";
@@ -102,7 +103,12 @@ export function App() {
   return (
     <>
       <header className="topbar">
-        <strong className="brand">Reparto La Laguna</strong>
+        <a className="brand" href="#pedidos">
+          <span className="brand-plate">
+            <img src={logo} alt="Graneros Guerra" width={65} height={48} />
+          </span>
+          Reparto
+        </a>
         <label className="date-field">
           Reparto del
           <input

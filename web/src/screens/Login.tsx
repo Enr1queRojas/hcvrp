@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { api, messageOf } from "../api";
+import logo from "../assets/logo-graneros-guerra.png";
 
 export function Login({ onLogin }: { onLogin: (username: string) => void }) {
   const [username, setUsername] = useState("");
@@ -27,7 +28,8 @@ export function Login({ onLogin }: { onLogin: (username: string) => void }) {
   return (
     <main className="login">
       <form onSubmit={submit}>
-        <h1>Reparto La Laguna</h1>
+        <img src={logo} alt="Graneros Guerra" width={98} height={72} />
+        <h1>Planeador de reparto</h1>
         <p>Planea qué lleva cada camión mañana.</p>
         <label>
           Usuario
