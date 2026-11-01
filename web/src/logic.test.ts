@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError, setOnUnauthorized } from "./api";
 import { hhmm, kg, mxn, tomorrowISO } from "./format";
-import { segments } from "./timeline";
+import { segments, tripLabel } from "./timeline";
 
 describe("format", () => {
   it("convierte minutos de jornada en hora del día", () => {
@@ -32,6 +32,17 @@ describe("segments", () => {
   });
   it("con un solo viaje no hay recarga", () => {
     expect(segments([trip(1, 0, 100)], 120)).toEqual([{ kind: "trip", start: 0, end: 100, tripNo: 1 }]);
+  });
+});
+
+describe("tripLabel", () => {
+  it("usa singular y plural", () => {
+    expect(tripLabel(1, 1, 200)).toBe("Viaje 1: 1 cliente");
+    expect(tripLabel(2, 7, 200)).toBe("Viaje 2: 7 clientes");
+  });
+  it("se acorta en los viajes breves para no cortarse", () => {
+    expect(tripLabel(2, 4, 100)).toBe("Viaje 2");
+    expect(tripLabel(3, 1, 30)).toBe("3");
   });
 });
 

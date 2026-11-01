@@ -15,11 +15,29 @@ from hcvrp.api.planning import Recalculator, make_geometry, make_provider
 from hcvrp.api.settings import Settings
 
 
+_FIELD_MESSAGES = {
+    "date": "la fecha no es válida",
+    "capacity_kg": "la capacidad debe ser mayor que 0",
+    "km_per_liter": "el rendimiento debe ser mayor que 0",
+    "fixed_dispatch_cost_mxn": "el costo fijo no puede ser negativo",
+    "diesel_mxn_per_liter": "el precio del diésel debe ser mayor que 0",
+    "loading_mxn_per_kg": "el costo de carga no puede ser negativo",
+    "shift_minutes": "la jornada debe durar entre 60 y 900 minutos",
+    "service_minutes": "el tiempo de entrega debe estar entre 0 y 120 minutos",
+    "reload_minutes": "el tiempo de recarga debe estar entre 0 y 480 minutos",
+    "max_trips_per_vehicle": "los viajes por camión deben estar entre 1 y 6",
+    "time_limit_s": "el tiempo máximo de cálculo debe estar entre 1 y 60 segundos",
+    "code": "el código es obligatorio, de hasta 40 caracteres y sin /",
+    "name": "el nombre es obligatorio, de hasta 120 caracteres",
+    "trip_no": "el viaje debe ser 1 o mayor",
+}
+
+
 def _validation_message(error: dict[str, Any]) -> str:
     if error["type"] == "value_error":
         return error["msg"].removeprefix("Value error, ")
-    field = ".".join(str(part) for part in error["loc"] if part not in ("body", "query", "path"))
-    return f"dato inválido en {field}"
+    field = str(error["loc"][-1])
+    return _FIELD_MESSAGES.get(field, f"dato inválido en {field}")
 
 
 async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

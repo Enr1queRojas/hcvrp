@@ -4,6 +4,12 @@ export type Segment =
 
 type TripTimes = { trip_no: number; start_min: number; end_min: number };
 
+export function tripLabel(tripNo: number, stops: number, minutes: number): string {
+  if (minutes < 45) return String(tripNo);
+  if (minutes < 150) return `Viaje ${tripNo}`;
+  return `Viaje ${tripNo}: ${stops} ${stops === 1 ? "cliente" : "clientes"}`;
+}
+
 export function segments(trips: TripTimes[], reloadMinutes: number): Segment[] {
   const out: Segment[] = [];
   trips.forEach((trip, i) => {

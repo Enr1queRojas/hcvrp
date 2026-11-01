@@ -54,11 +54,11 @@ button.danger { color: var(--problem); }
 .empty { padding: 1.5rem 0; color: var(--ink-soft); margin: 0; }
 
 /* Barra superior */
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; padding: 0.625rem 1.5rem; background: var(--ink); color: #fff; }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; padding: 0.5rem 1.25rem; background: var(--ink); color: #fff; }
 .topbar a, .topbar button.link { color: #fff; }
 .brand { font-family: var(--condensed); font-size: 1.375rem; font-weight: 600; }
 .date-field { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; }
-.date-field input { width: auto; min-height: 2.25rem; color: var(--ink); border-color: transparent; }
+.date-field input { width: 9.75rem; min-height: 2.25rem; color: var(--ink); border-color: transparent; }
 .topbar nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
 .topbar nav a { padding: 0.25rem 0; text-decoration: none; border-bottom: 3px solid transparent; }
 .topbar nav a:hover { border-color: rgb(255 255 255 / 45%); }
@@ -164,6 +164,11 @@ tfoot th { color: var(--ink); font-size: 1rem; border-bottom: 0; }
 .truck summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 1rem; cursor: pointer; }
 .truck summary strong { font-family: var(--condensed); font-size: 1.375rem; }
 .truck summary button { margin-left: auto; }
+.trip-block table { table-layout: fixed; min-width: 44rem; }
+.trip-block th:nth-child(1) { width: 4.5rem; }
+.trip-block th:nth-child(3) { width: 7rem; }
+.trip-block th:nth-child(4), .trip-block th:nth-child(5) { width: 4.5rem; }
+.trip-block th:nth-child(6) { width: 22rem; }
 .assign { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: center; }
 .assign select { width: 9.5rem; min-height: 2rem; padding: 0.125rem 0.25rem; font-size: 0.875rem; }
 .locked { font-weight: 500; font-size: 0.9375rem; white-space: nowrap; }

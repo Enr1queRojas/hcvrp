@@ -1,5 +1,5 @@
 import { hhmm, kg, truckColor } from "../format";
-import { segments } from "../timeline";
+import { segments, tripLabel } from "../timeline";
 import type { Params, Vehicle, VehiclePlan } from "../types";
 
 type Props = {
@@ -59,7 +59,7 @@ export function ShiftTimeline({ fleet, vehicles, params, only, onSelect }: Props
                       style={style}
                       title={`Recarga en bodega, ${hhmm(seg.start)} a ${hhmm(seg.end)}`}
                     >
-                      <span>Recarga</span>
+                      {seg.end - seg.start >= 60 && <span>Recarga</span>}
                     </div>
                   );
                 }
@@ -69,9 +69,9 @@ export function ShiftTimeline({ fleet, vehicles, params, only, onSelect }: Props
                     key={`t${seg.tripNo}`}
                     className="segment trip"
                     style={{ ...style, background: color }}
-                    title={`Viaje ${trip.trip_no}, ${hhmm(seg.start)} a ${hhmm(seg.end)}: ${trip.stops.length} clientes, ${kg(trip.kg)}`}
+                    title={`Viaje ${trip.trip_no}, ${hhmm(seg.start)} a ${hhmm(seg.end)}: ${trip.stops.length} ${trip.stops.length === 1 ? "cliente" : "clientes"}, ${kg(trip.kg)}`}
                   >
-                    <span>Viaje {trip.trip_no}: {trip.stops.length} clientes</span>
+                    <span>{tripLabel(trip.trip_no, trip.stops.length, seg.end - seg.start)}</span>
                   </div>
                 );
               })}
