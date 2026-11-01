@@ -21,7 +21,7 @@ export function TruckSheet({ date, vehicle, clients, onDone }: Props) {
 
   return createPortal(
     <article className="print-sheet">
-      <img src={logo} alt="Graneros Guerra" width={65} height={48} />
+      <img src={logo} alt="Graneros Guerra" width={120} height={84} />
       <h1>Camión {vehicle.vehicle_id}</h1>
       <p>Reparto del {date}. Salida a las 09:00 con el viaje 1 ya cargado.</p>
       {vehicle.trips.map((trip) => (

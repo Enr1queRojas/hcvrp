@@ -1,14 +1,14 @@
 :root {
-  --brand: #124e2a;
-  --brand-dark: #0c3a1f;
-  --plate: #f6f6f6;
-  --ink: #23282a;
-  --ink-soft: #5a6560;
+  --brand: #015c28;
+  --brand-dark: #014a20;
+  --plate: #fdfdfd;
+  --ink: #010000;
+  --ink-soft: #55615a;
   --ground: #f0f2ef;
   --surface: #ffffff;
   --line: #cdd4ce;
-  --signal: #f2c200;
-  --signal-soft: #fff6cc;
+  --signal: #fcb61c;
+  --signal-soft: #fff1cf;
   --problem: #a8201a;
   --problem-soft: #fbe9e7;
   --ok: #1f6b3a;
@@ -69,10 +69,10 @@ button.danger { color: var(--problem); }
 .topbar nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
 .topbar nav a { padding: 0.25rem 0; text-decoration: none; border-bottom: 3px solid transparent; }
 .topbar nav a:hover { border-color: rgb(255 255 255 / 45%); }
-.topbar nav a[aria-current="page"] { border-color: #fff; font-weight: 600; }
+.topbar nav a[aria-current="page"] { border-color: var(--signal); font-weight: 600; }
 .topbar :focus-visible { outline-color: #fff; }
 .plan-state { margin-left: auto; font-size: 0.9375rem; }
-.plan-state-calculando::before { content: ""; display: inline-block; width: 0.625rem; height: 0.625rem; margin-right: 0.5rem; border-radius: 50%; background: #fff; animation: pulse 1.2s ease-in-out infinite; }
+.plan-state-calculando::before { content: ""; display: inline-block; width: 0.625rem; height: 0.625rem; margin-right: 0.5rem; border-radius: 50%; background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
 .plan-state-error { color: var(--signal); font-weight: 600; }
 .user { display: flex; gap: 0.75rem; font-size: 0.9375rem; }
 @keyframes pulse { 50% { opacity: 0.3; } }
@@ -83,8 +83,8 @@ button.danger { color: var(--problem); }
 
 /* Acceso */
 .login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; background: var(--brand); }
-.login form { width: min(100%, 24rem); display: grid; gap: 1rem; padding: 2rem; background: var(--plate); }
-.login img { display: block; }
+.login form { width: min(100%, 24rem); display: grid; gap: 1rem; padding: 2rem; background: var(--plate); border-top: 6px solid var(--signal); }
+.login img { display: block; justify-self: center; }
 .login p { margin: 0; }
 .login form > p:first-of-type { color: var(--ink-soft); margin-top: -0.75rem; }
 
@@ -142,7 +142,7 @@ tfoot th { color: var(--ink); font-size: 1rem; border-bottom: 0; }
 /* Mapas */
 .map { width: 100%; height: 30rem; background: #dde3e6; }
 .stop-marker { width: 1.5rem; height: 1.5rem; display: grid; place-items: center; color: #fff; font-size: 0.8125rem; font-weight: 600; border: 2px solid #fff; border-radius: 50%; cursor: pointer; }
-.depot-marker { width: 1.25rem; height: 1.25rem; background: var(--brand); border: 3px solid #fff; outline: 1px solid var(--brand); }
+.depot-marker { width: 1.25rem; height: 1.25rem; background: var(--brand); border: 3px solid var(--signal); }
 .client-marker { width: 1rem; height: 1rem; min-height: 0; padding: 0; border: 2px solid #fff; border-radius: 50%; cursor: pointer; }
 .client-marker.status-verificada { background: var(--ok); }
 .client-marker.status-sintetica { background: var(--ink-soft); }

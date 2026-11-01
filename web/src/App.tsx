@@ -105,7 +105,7 @@ export function App() {
       <header className="topbar">
         <a className="brand" href="#pedidos">
           <span className="brand-plate">
-            <img src={logo} alt="Graneros Guerra" width={65} height={48} />
+            <img src={logo} alt="Graneros Guerra" width={80} height={56} />
           </span>
           Reparto
         </a>
