@@ -155,6 +155,7 @@ def test_startup_plans_days_left_pending(settings):
 
 def test_missing_ors_key_becomes_plan_error(settings, monkeypatch):
     monkeypatch.delenv("ORS_API_KEY", raising=False)
+    monkeypatch.delenv("ORS_API", raising=False)
     ors = Settings(db_path=settings.db_path, provider="ors", debounce_s=0)
     add_order(connect(settings.db_path), DAY, "AARON", 500)
     recalc = Recalculator(ors, make_provider(ors))

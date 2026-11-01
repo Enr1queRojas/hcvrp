@@ -40,7 +40,16 @@ def test_invalid_kg_rejected(client, kg):
 
 def test_validation_errors_are_in_spanish(client):
     r = client.post("/api/orders", json={"client_code": "AARON", "kg": 100})
-    assert r.status_code == 422 and r.json()["detail"] == "dato inválido en date"
+    assert r.status_code == 422 and r.json()["detail"] == "la fecha no es válida"
+
+
+def test_catalog_validation_speaks_the_users_language(client):
+    params = client.get("/api/params").json()
+    r = client.put("/api/params", json={**params, "time_limit_s": 0})
+    assert r.json()["detail"] == "el tiempo máximo de cálculo debe estar entre 1 y 60 segundos"
+    fleet = client.get("/api/fleet").json()
+    r = client.put("/api/fleet", json=[{**fleet[0], "capacity_kg": 0}])
+    assert r.json()["detail"] == "la capacidad debe ser mayor que 0"
 
 
 def test_unknown_client_404(client):

@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from hcvrp.api.db import connect
-from hcvrp.api.settings import Settings
+from hcvrp.api.settings import Settings, load_env
 from hcvrp.api.store import (
     get_client, get_fleet, list_clients, set_fleet, set_params, upsert_client,
 )
@@ -70,4 +70,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    load_env()
     raise SystemExit(main(sys.argv[1:]))

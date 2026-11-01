@@ -92,6 +92,7 @@ def test_cache_returns_caller_key_order(tmp_path):
 
 def test_ors_requires_key(monkeypatch):
     monkeypatch.delenv("ORS_API_KEY", raising=False)
+    monkeypatch.delenv("ORS_API", raising=False)
     with pytest.raises(RuntimeError, match="ORS_API_KEY"):
         OrsProvider()
 
@@ -132,3 +133,11 @@ def test_ors_network_error_readable():
     p = OrsProvider("k", httpx.Client(transport=httpx.MockTransport(fail)))
     with pytest.raises(RuntimeError, match="no hay conexión"):
         p.matrix({"DEPOT": Location(25.5, -103.4), "A": Location(25.6, -103.3)})
+
+
+def test_ors_accepts_key_under_either_name(monkeypatch):
+    monkeypatch.delenv("ORS_API_KEY", raising=False)
+    monkeypatch.setenv("ORS_API", "clave-corta")
+    assert OrsProvider().api_key == "clave-corta"
+    monkeypatch.setenv("ORS_API_KEY", "clave-larga")
+    assert OrsProvider().api_key == "clave-larga"

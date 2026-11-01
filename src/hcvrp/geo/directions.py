@@ -35,7 +35,8 @@ class OrsDirections:
             return json.loads(path.read_text(encoding="utf-8"))
         if self._ors is None:
             self._ors = OrsProvider(self.api_key, self.client)  # sin clave falla aquí, no al arrancar
-        data = self._ors._post("directions/driving-hgv/geojson", {"coordinates": coordinates})
+        body = {"coordinates": coordinates, "radiuses": [-1] * len(coordinates)}  # sin límite, como la matriz
+        data = self._ors._post("directions/driving-hgv/geojson", body)
         geometry = data["features"][0]["geometry"]["coordinates"]
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(geometry), encoding="utf-8")

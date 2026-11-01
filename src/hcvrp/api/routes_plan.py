@@ -21,7 +21,8 @@ def get_plan(date: Date, request: Request, conn: sqlite3.Connection = Depends(ge
     if row is None and not problem.orders:
         return PlanStatusOut(status="ninguno", stale=False, error=None, plan=None, computed_at=None)
 
-    current = row is not None and row["inputs_hash"] == inputs_hash(problem)
+    provider = request.app.state.settings.provider
+    current = row is not None and row["inputs_hash"] == inputs_hash(problem, provider)
     if not problem.orders:
         status = row["status"]
     elif request.app.state.recalc.is_busy(date) or not current:
