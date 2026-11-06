@@ -10,10 +10,15 @@ export function setOnUnauthorized(fn: () => void): void {
   onUnauthorized = fn;
 }
 
+/** "/api/x" se pide como "api/x", relativo a la página, para funcionar bajo un prefijo como /rutas/. */
+export function apiUrl(path: string): string {
+  return path.replace(/^\/+/, "");
+}
+
 export async function api<T = void>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await fetch(apiUrl(path), {
       method: options.method ?? "GET",
       headers: options.body === undefined ? undefined : { "Content-Type": "application/json" },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),

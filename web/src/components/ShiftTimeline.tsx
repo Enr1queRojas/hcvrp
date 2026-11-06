@@ -1,4 +1,4 @@
-import { hhmm, kg, truckColor } from "../format";
+import { hhmm, kg, tripColor, type ColorOf } from "../format";
 import { segments, tripLabel } from "../timeline";
 import type { Params, Vehicle, VehiclePlan } from "../types";
 
@@ -6,11 +6,12 @@ type Props = {
   fleet: Vehicle[];
   vehicles: VehiclePlan[];
   params: Params;
+  colorOf: ColorOf;
   only: string | null;
   onSelect: (vehicleId: string | null) => void;
 };
 
-export function ShiftTimeline({ fleet, vehicles, params, only, onSelect }: Props) {
+export function ShiftTimeline({ fleet, vehicles, params, colorOf, only, onSelect }: Props) {
   const shift = params.shift_minutes;
   const pct = (minute: number) => `${(100 * minute) / shift}%`;
   const hours = Array.from({ length: Math.floor(shift / 60) + 1 }, (_, i) => i * 60);
@@ -24,7 +25,7 @@ export function ShiftTimeline({ fleet, vehicles, params, only, onSelect }: Props
       </div>
       {fleet.map((truck) => {
         const plan = vehicles.find((v) => v.vehicle_id === truck.vehicle_id);
-        const color = truckColor(truck.vehicle_id);
+        const color = colorOf(truck.vehicle_id);
         const trips = plan?.trips ?? [];
         const lastTrip = trips[trips.length - 1];
         const note = !truck.available
@@ -68,7 +69,7 @@ export function ShiftTimeline({ fleet, vehicles, params, only, onSelect }: Props
                   <div
                     key={`t${seg.tripNo}`}
                     className="segment trip"
-                    style={{ ...style, background: color }}
+                    style={{ ...style, background: tripColor(color, trip.trip_no) }}
                     title={`Viaje ${trip.trip_no}, ${hhmm(seg.start)} a ${hhmm(seg.end)}: ${trip.stops.length} ${trip.stops.length === 1 ? "cliente" : "clientes"}, ${kg(trip.kg)}`}
                   >
                     <span>{tripLabel(trip.trip_no, trip.stops.length, seg.end - seg.start)}</span>

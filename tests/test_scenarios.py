@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from hcvrp.scenarios import SCENARIOS, generate_scenario
@@ -32,3 +34,20 @@ def test_independent_of_insertion_order(clients):
 def test_unknown_scenario(clients):
     with pytest.raises(ValueError):
         generate_scenario("xyz", clients)
+
+
+def test_only_clients_with_location(clients):
+    codes = sorted(clients)
+    without = set(codes[::2])
+    mixed = {
+        code: dataclasses.replace(c, location=None) if code in without else c
+        for code, c in clients.items()
+    }
+    s = generate_scenario("ligero", mixed)
+    assert s and not {o.client_code for o in s} & without
+
+
+def test_not_enough_clients_with_location(clients):
+    none_located = {code: dataclasses.replace(c, location=None) for code, c in clients.items()}
+    with pytest.raises(ValueError, match="con ubicación"):
+        generate_scenario("ligero", none_located)

@@ -1,7 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, setOnUnauthorized } from "./api";
-import { hhmm, kg, mxn, tomorrowISO } from "./format";
+import { api, ApiError, apiUrl, setOnUnauthorized } from "./api";
+import { hhmm, kg, mxn, tomorrowISO, tripColor, truckColors } from "./format";
 import { segments, tripLabel } from "./timeline";
+
+describe("colores", () => {
+  it("da un color distinto a cada camión de la flota", () => {
+    const ids = ["Leña", "Soriano", "Corto", "Guinda", "Volvo", "Mercedes"];
+    const colorOf = truckColors(ids);
+    expect(new Set(ids.map(colorOf)).size).toBe(ids.length);
+    expect(colorOf("Desconocido")).toBe(colorOf("Desconocido"));
+  });
+  it("da un tono distinto a cada viaje del mismo camión", () => {
+    const base = truckColors(["Leña"])("Leña");
+    const shades = [1, 2, 3, 4].map((n) => tripColor(base, n));
+    expect(shades[0]).toBe(base);
+    expect(new Set(shades).size).toBe(4);
+  });
+});
 
 describe("format", () => {
   it("convierte minutos de jornada en hora del día", () => {
@@ -68,6 +83,13 @@ describe("api", () => {
   it("una respuesta 204 no es error", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     await expect(api("/api/orders/1", { method: "DELETE" })).resolves.toBeUndefined();
+  });
+  it("pide la API relativa a la página, para servir bajo /rutas/", async () => {
+    expect(apiUrl("/api/me")).toBe("api/me");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api("/api/me");
+    expect(fetchMock).toHaveBeenCalledWith("api/me", expect.anything());
   });
   it("sin red da un mensaje legible", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("failed"); }));

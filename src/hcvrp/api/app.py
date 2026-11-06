@@ -60,10 +60,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.recalc = Recalculator(settings, make_provider(settings), make_geometry(settings))
     app.state.on_change = app.state.recalc.request
     app.add_exception_handler(RequestValidationError, _validation_error)
-    app.include_router(routes_auth.router)
-    app.include_router(routes_catalog.router)
-    app.include_router(routes_orders.router)
-    app.include_router(routes_plan.router)
-    app.include_router(routes_web.router)
-    routes_web.mount_web(app, settings.web_dist)
+    base = settings.base_path
+    for module in (routes_auth, routes_catalog, routes_orders, routes_plan, routes_web):
+        app.include_router(module.router, prefix=base)
+    routes_web.mount_web(app, settings.web_dist, base)
     return app

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, messageOf } from "../api";
 import { RouteMap } from "../components/RouteMap";
 import { ShiftTimeline } from "../components/ShiftTimeline";
 import { TruckSheet } from "../components/TruckSheet";
-import { hhmm, kg, km, mxn, truckColor } from "../format";
+import { hhmm, kg, km, mxn, tripColor, truckColors } from "../format";
 import type { Client, Config, Order, Params, Plan, PlanStatus, Vehicle, VehiclePlan } from "../types";
 
 type Props = {
@@ -36,6 +36,7 @@ export function PlanView({ date, status, config, onChanged }: Props) {
   const [error, setError] = useState("");
 
   const stopPrinting = useCallback(() => setPrinting(null), []);
+  const colorOf = useMemo(() => truckColors(fleet.map((v) => v.vehicle_id)), [fleet]);
 
   const load = useCallback(async () => {
     const [o, c, f, p] = await Promise.all([
@@ -175,10 +176,10 @@ export function PlanView({ date, status, config, onChanged }: Props) {
           )}
 
           <h2>La jornada de cada camión</h2>
-          <ShiftTimeline fleet={fleet} vehicles={plan.vehicles} params={params} only={only} onSelect={setOnly} />
+          <ShiftTimeline fleet={fleet} vehicles={plan.vehicles} params={params} colorOf={colorOf} only={only} onSelect={setOnly} />
 
           <div className="plan-columns">
-            <RouteMap vehicles={plan.vehicles} clients={clients} depot={config.depot} only={only} />
+            <RouteMap vehicles={plan.vehicles} clients={clients} depot={config.depot} colorOf={colorOf} only={only} />
             <div>
               <h2>Carga de esta tarde</h2>
               <p className="hint">Lo que se sube hoy a cada camión para salir a las 09:00.</p>
@@ -187,7 +188,7 @@ export function PlanView({ date, status, config, onChanged }: Props) {
                 <tbody>
                   {plan.afternoon_load.map((load) => (
                     <tr key={load.vehicle_id}>
-                      <td><strong style={{ color: truckColor(load.vehicle_id) }}>{load.vehicle_id}</strong></td>
+                      <td><strong style={{ color: colorOf(load.vehicle_id) }}>{load.vehicle_id}</strong></td>
                       <td className="num">{kg(load.kg)}</td>
                       <td className="num">{load.orders}</td>
                       <td className="num">{load.capacity_pct}%</td>
@@ -224,7 +225,7 @@ export function PlanView({ date, status, config, onChanged }: Props) {
 
           <h2>Viajes y paradas</h2>
           {plan.vehicles.map((vehicle) => (
-            <details key={vehicle.vehicle_id} className="truck" open style={{ borderColor: truckColor(vehicle.vehicle_id) }}>
+            <details key={vehicle.vehicle_id} className="truck" open style={{ borderColor: colorOf(vehicle.vehicle_id) }}>
               <summary>
                 <strong>Camión {vehicle.vehicle_id}</strong>
                 <span className="muted">{vehicle.trips.length} {vehicle.trips.length === 1 ? "viaje" : "viajes"}, capacidad {kg(vehicle.capacity_kg)}</span>
@@ -234,7 +235,7 @@ export function PlanView({ date, status, config, onChanged }: Props) {
               </summary>
               {vehicle.trips.map((trip) => (
                 <div key={trip.trip_no} className="trip-block">
-                  <h3>
+                  <h3 style={{ borderLeft: `6px solid ${tripColor(colorOf(vehicle.vehicle_id), trip.trip_no)}`, paddingLeft: "0.5rem" }}>
                     Viaje {trip.trip_no}: {hhmm(trip.start_min)} a {hhmm(trip.end_min)}, {km(trip.km)}, {kg(trip.kg)} ({trip.capacity_pct}% de la capacidad)
                   </h3>
                   <div className="table-wrap">
