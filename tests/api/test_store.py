@@ -106,7 +106,7 @@ def test_seed_is_idempotent_and_cleans_null(tmp_path, clients_file):
     assert seed.main(["--clients", str(clients_file), "--db", str(db)]) == 0
     conn = connect(db)
     assert len(list_clients(conn)) == 35
-    assert len(get_fleet(conn)) == 4
+    assert get_fleet(conn) == DEFAULT_FLEET
     assert get_client(conn, first.code).address == ""
 
 

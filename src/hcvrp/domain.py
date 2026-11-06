@@ -131,9 +131,12 @@ class Problem:
 
 DEPOT = Location(lat=25.528580, lon=-103.373271)
 
+# Flota de Graneros Guerra. Rendimientos (km/L) estimados por tamaño; se ajustan en la app.
 DEFAULT_FLEET: list[Vehicle] = [
-    Vehicle("V1", 10_000, 4.0),
-    Vehicle("V2", 20_000, 2.8),
-    Vehicle("V3", 20_000, 2.8),
-    Vehicle("V4", 30_000, 2.2),
+    Vehicle("Leña", 10_000, 4.0),
+    Vehicle("Soriano", 10_000, 4.0),
+    Vehicle("Corto", 5_000, 5.0),
+    Vehicle("Guinda", 20_000, 2.8),
+    Vehicle("Volvo", 20_000, 2.8),
+    Vehicle("Mercedes", 15_000, 3.3),
 ]

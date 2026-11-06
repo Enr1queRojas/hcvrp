@@ -3,11 +3,13 @@ import dataclasses
 import pytest
 
 from hcvrp.domain import (
-    DEFAULT_FLEET, DEPOT, Client, Location, LocationStatus, Order, Params, Problem,
+    DEPOT, Client, Location, LocationStatus, Order, Params, Problem,
     UnservedReason,
 )
 from hcvrp.geo.matrix import Matrix
 from hcvrp.precheck import merge_orders, points_for, precheck
+
+from fleets import TEST_FLEET
 
 
 def test_merge_same_client():
@@ -29,7 +31,7 @@ def _problem(kg=3000, loc=LOC, fleet=None, locks=None, orders=None, clients=None
     return Problem(
         DEPOT,
         clients if clients is not None else {"C": _client("C", loc)},
-        list(fleet if fleet is not None else DEFAULT_FLEET),
+        list(fleet if fleet is not None else TEST_FLEET),
         orders if orders is not None else [Order("o1", "C", kg)],
         Params(),
         locks or {},
@@ -63,7 +65,7 @@ def test_exceeds_capacity():
 
 def test_exceeds_available_capacity_when_v4_unavailable():
     fleet = [dataclasses.replace(v, available=False) if v.vehicle_id == "V4" else v
-             for v in DEFAULT_FLEET]
+             for v in TEST_FLEET]
     _, reasons = _reasons(_problem(kg=25_000, fleet=fleet), _matrix())
     assert reasons == {"o1": UnservedReason.EXCEDE_CAPACIDAD}
 
@@ -75,7 +77,7 @@ def test_does_not_fit_shift():
 
 def _unavail_fleet():
     return [dataclasses.replace(v, available=False) if v.vehicle_id == "V4" else v
-            for v in DEFAULT_FLEET]
+            for v in TEST_FLEET]
 
 
 def test_lock_to_unavailable_vehicle_raises():
@@ -124,6 +126,6 @@ def test_points_for():
 
 
 def test_no_available_vehicles_skips_capacity_check():
-    fleet = [dataclasses.replace(v, available=False) for v in DEFAULT_FLEET]
+    fleet = [dataclasses.replace(v, available=False) for v in TEST_FLEET]
     planeable, reasons = _reasons(_problem(kg=35_000, fleet=fleet), _matrix())
     assert planeable == [Order("o1", "C", 35_000)] and reasons == {}
