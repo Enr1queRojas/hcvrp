@@ -126,7 +126,11 @@ class Problem:
     vehicles: list[Vehicle]
     orders: list[Order]
     params: Params
-    locks: dict[str, tuple[str, int]] = field(default_factory=dict)
+    # Bloqueos: pedido -> (camión, viaje); viaje None = solo el camión, el plan elige el viaje.
+    locks: dict[str, tuple[str, int | None]] = field(default_factory=dict)
+    # Orden a mano: pedido -> posición dentro de su viaje bloqueado (1, 2, ...). Solo cuenta el
+    # orden relativo entre los pedidos con posición del mismo (camión, viaje).
+    positions: dict[str, int] = field(default_factory=dict)
 
 
 DEPOT = Location(lat=25.528580, lon=-103.373271)

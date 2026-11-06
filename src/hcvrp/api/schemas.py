@@ -111,7 +111,17 @@ class OrderPatch(BaseModel):
 
 class LockIO(BaseModel):
     vehicle_id: str
-    trip_no: int = Field(ge=1)
+    trip_no: int | None = Field(default=None, ge=1)  # None: solo el camión, el plan elige el viaje
+
+
+class LockOut(LockIO):
+    position: int | None = None  # posición dentro del viaje cuando el orden se fijó a mano
+
+
+class SequenceIn(BaseModel):
+    date: Date
+    vehicle_id: str
+    trips: list[list[int]]  # ids de pedido por viaje, en el orden de entrega
 
 
 class OrderOut(BaseModel):
@@ -120,7 +130,7 @@ class OrderOut(BaseModel):
     client_code: str
     client_name: str
     kg: int
-    lock: LockIO | None
+    lock: LockOut | None
 
 
 class ScenarioIn(BaseModel):

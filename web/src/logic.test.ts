@@ -1,7 +1,34 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError, apiUrl, setOnUnauthorized } from "./api";
-import { hhmm, kg, mxn, tomorrowISO, tripColor, truckColors } from "./format";
+import { hhmm, kg, lockText, mxn, tomorrowISO, tripColor, truckColors } from "./format";
+import { moveStop, shiftStop } from "./sequence";
 import { segments, tripLabel } from "./timeline";
+
+describe("orden de paradas", () => {
+  const trips = [["a", "b", "c"], ["d", "e"]];
+  it("mueve una parada antes o después de otra", () => {
+    expect(moveStop(trips, "c", "a", false)).toEqual([["c", "a", "b"], ["d", "e"]]);
+    expect(moveStop(trips, "a", "b", true)).toEqual([["b", "a", "c"], ["d", "e"]]);
+  });
+  it("pasa una parada a otro viaje y quita viajes vacíos", () => {
+    expect(moveStop(trips, "b", "e", true)).toEqual([["a", "c"], ["d", "e", "b"]]);
+    expect(moveStop([["a"], ["b"]], "a", "b", false)).toEqual([["a", "b"]]);
+  });
+  it("no cambia nada al soltar sobre sí misma", () => {
+    expect(moveStop(trips, "b", "b", true)).toBe(trips);
+  });
+  it("sube y baja con el teclado, cruzando entre viajes", () => {
+    expect(shiftStop(trips, "b", -1)).toEqual([["b", "a", "c"], ["d", "e"]]);
+    expect(shiftStop(trips, "c", 1)).toEqual([["a", "b"], ["c", "d", "e"]]);
+    expect(shiftStop(trips, "d", -1)).toEqual([["a", "b", "c", "d"], ["e"]]);
+    expect(shiftStop(trips, "a", -1)).toBe(trips);
+    expect(shiftStop(trips, "e", 1)).toBe(trips);
+  });
+  it("describe el bloqueo", () => {
+    expect(lockText({ vehicle_id: "Leña", trip_no: null, position: null })).toBe("Fijado en Leña");
+    expect(lockText({ vehicle_id: "Leña", trip_no: 2, position: 3 })).toBe("Fijado en Leña, viaje 2, parada 3");
+  });
+});
 
 describe("colores", () => {
   it("da un color distinto a cada camión de la flota", () => {

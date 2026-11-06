@@ -74,3 +74,9 @@ export function tripColor(base: string, tripNo: number): string {
   if (step === 2) return mix(base, 255, 0.25);
   return mix(base, 0, 0.6);
 }
+
+export function lockText(lock: { vehicle_id: string; trip_no: number | null; position: number | null }): string {
+  if (lock.trip_no === null) return `Fijado en ${lock.vehicle_id}`;
+  const base = `Fijado en ${lock.vehicle_id}, viaje ${lock.trip_no}`;
+  return lock.position === null ? base : `${base}, parada ${lock.position}`;
+}

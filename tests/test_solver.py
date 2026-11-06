@@ -103,3 +103,44 @@ def test_tiny_far_order_is_served(problem_ab):
     p = replace(problem_ab, clients={"F": far}, orders=[Order("o1", "F", 1)])
     plan, m = solve(p, HaversineProvider())
     assert plan.unserved == () and validate(p, plan, m) == []
+
+
+def test_vehicle_only_lock_lets_plan_choose_trip(problem_for):
+    p = problem_for("ligero"); oid = p.orders[0].order_id
+    locked = replace(p, locks={oid: ("V2", None)})
+    plan, m = solve(locked, HaversineProvider())
+    assert validate(locked, plan, m) == []
+    assert oid in {s.order_id for v in plan.vehicles if v.vehicle_id == "V2" for t in v.trips for s in t.stops}
+
+
+def test_manual_order_respected(problem_for):
+    p = problem_for("pesado")
+    base, _ = solve(p, HaversineProvider())
+    found = next(
+        ((v.vehicle_id, t.trip_no, [s.order_id for s in t.stops])
+         for v in base.vehicles for t in v.trips if len(t.stops) >= 3),
+        None,
+    )
+    if found is None:
+        pytest.skip("ningún viaje tiene 3 paradas o más")
+    vid, trip_no, stops = found
+    wanted = list(reversed(stops))  # el orden opuesto al que eligió el motor
+    locked = replace(
+        p,
+        locks={oid: (vid, trip_no) for oid in wanted},
+        positions={oid: i for i, oid in enumerate(wanted, start=1)},
+    )
+    plan, m = solve(locked, HaversineProvider())
+    assert validate(locked, plan, m) == []
+    trip = next(t for v in plan.vehicles if v.vehicle_id == vid for t in v.trips if t.trip_no == trip_no)
+    got = [s.order_id for s in trip.stops if s.order_id in set(wanted)]
+    assert got == wanted
+    assert sum(u.reason == UnservedReason.SATURACION_FLOTA for u in plan.unserved) == sum(
+        u.reason == UnservedReason.SATURACION_FLOTA for u in base.unserved
+    )
+
+
+def test_position_without_trip_lock_rejected(problem_for):
+    p = problem_for("ligero"); oid = p.orders[0].order_id
+    with pytest.raises(ValueError):
+        solve(replace(p, locks={oid: ("V2", None)}, positions={oid: 1}), HaversineProvider())

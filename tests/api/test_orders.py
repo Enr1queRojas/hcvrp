@@ -91,7 +91,7 @@ def test_lock_validation_and_cascade(client):
     r = client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2", "trip_no": 4})
     assert r.status_code == 422 and r.json()["detail"] == "el viaje debe estar entre 1 y 3"
     assert client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2", "trip_no": 2}).status_code == 200
-    assert client.get(f"/api/orders?date={D}").json()[0]["lock"] == {"vehicle_id": "V2", "trip_no": 2}
+    assert client.get(f"/api/orders?date={D}").json()[0]["lock"] == {"vehicle_id": "V2", "trip_no": 2, "position": None}
     assert client.delete(f"/api/orders/{o['id']}").status_code == 204
     assert client.get(f"/api/orders?date={D}").json() == []
 
@@ -119,3 +119,42 @@ def test_order_writes_notify_their_date(client):
     client.delete(f"/api/orders/{o['id']}")
     client.post("/api/orders/scenario", json={"date": D, "name": "ligero"})
     assert calls == [day] * 6
+
+
+def test_lock_truck_only(client):
+    o = add(client).json()
+    r = client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2"})
+    assert r.status_code == 200
+    assert client.get(f"/api/orders?date={D}").json()[0]["lock"] == {
+        "vehicle_id": "V2", "trip_no": None, "position": None,
+    }
+
+
+def test_sequence_endpoint(client):
+    a = add(client).json()
+    b = add(client, code="BETO", kg=500).json()
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V1", "trips": [[b["id"], a["id"]]]})
+    assert r.status_code == 204
+    locks = {o["id"]: o["lock"] for o in client.get(f"/api/orders?date={D}").json()}
+    assert locks[b["id"]] == {"vehicle_id": "V1", "trip_no": 1, "position": 1}
+    assert locks[a["id"]] == {"vehicle_id": "V1", "trip_no": 1, "position": 2}
+    assert client.delete(f"/api/orders/sequence?date={D}&vehicle_id=V1").status_code == 204
+    assert all(o["lock"] is None for o in client.get(f"/api/orders?date={D}").json())
+
+
+@pytest.mark.parametrize("trips,detail", [
+    ([[]], "no trae pedidos"),
+    ([[1, 1]], "más de una vez"),
+    ([[999]], "no son de ese día"),
+    ([[1], [2], [3], [4]], "a lo más"),
+])
+def test_sequence_rejects_bad_input(client, trips, detail):
+    add(client)
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V1", "trips": trips})
+    assert r.status_code == 422 and detail in r.json()["detail"]
+
+
+def test_sequence_unknown_truck(client):
+    o = add(client).json()
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "XX", "trips": [[o["id"]]]})
+    assert r.status_code == 422

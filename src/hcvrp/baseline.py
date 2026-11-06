@@ -13,7 +13,7 @@ from hcvrp.validate import validate
 def baseline_plan(problem: Problem, provider: DistanceProvider) -> tuple[Plan, Matrix]:
     """Vecino más cercano. La línea base es por definición libre de bloqueos: ignora
     `problem.locks` y se construye y valida contra el problema sin ellos."""
-    problem = replace(problem, locks={})
+    problem = replace(problem, locks={}, positions={})
     matrix = provider.matrix(points_for(problem))
     pending, unserved = precheck(problem, matrix)
     params = problem.params
