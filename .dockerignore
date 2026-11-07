@@ -1,0 +1,15 @@
+.git
+.venv
+.vscode
+.cache
+.pytest_cache
+.superpowers
+**/__pycache__
+*.egg-info
+web/node_modules
+web/dist
+data
+docs
+tests
+.env
+*-tencho-asus*

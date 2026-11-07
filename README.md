@@ -6,7 +6,7 @@ Planeador de reparto para Graneros Guerra. Para cambiar el logo, reemplaza
 
 ### Arranque
 .venv\Scripts\python -m hcvrp.api.seed --snap
-.venv\Scripts\python -m hcvrp.api.auth add-user ana
+.venv\Scripts\python -m hcvrp.api.auth add-user angely
 .venv\Scripts\python -m hcvrp.api
 
 A partir de cliente + kilos calcula qué
