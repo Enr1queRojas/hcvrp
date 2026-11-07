@@ -6,8 +6,8 @@ from hcvrp.api import seed
 from hcvrp.api.db import connect
 from hcvrp.api.store import (
     ClientInUse, NotFound, add_order, delete_client, delete_order, get_client, get_fleet,
-    get_locks, get_params, list_clients, list_orders, order_day, replace_orders, set_fleet,
-    set_lock, set_params, update_order_kg, upsert_client,
+    clear_sequence, get_locks, get_params, get_positions, list_clients, list_orders, order_day,
+    replace_orders, set_fleet, set_lock, set_params, set_sequence, update_order_kg, upsert_client,
 )
 from hcvrp.data.clients import load_clients, save_clients
 from hcvrp.domain import DEFAULT_FLEET, Client, Location, LocationStatus, Params
@@ -106,7 +106,7 @@ def test_seed_is_idempotent_and_cleans_null(tmp_path, clients_file):
     assert seed.main(["--clients", str(clients_file), "--db", str(db)]) == 0
     conn = connect(db)
     assert len(list_clients(conn)) == 35
-    assert len(get_fleet(conn)) == 4
+    assert get_fleet(conn) == DEFAULT_FLEET
     assert get_client(conn, first.code).address == ""
 
 
@@ -122,3 +122,89 @@ def test_reseed_keeps_user_changes(tmp_path, clients_file):
     assert get_client(conn, "AARON") == fixed
     assert len(get_fleet(conn)) == 1
     assert get_params(conn).diesel_mxn_per_liter == 25.5
+
+
+def test_lock_without_trip(conn_with_clients):
+    o = add_order(conn_with_clients, D, "AARON", 3000)
+    set_lock(conn_with_clients, int(o.order_id), "V2")
+    assert get_locks(conn_with_clients, D) == {o.order_id: ("V2", None)}
+    assert get_positions(conn_with_clients, D) == {}
+
+
+def test_sequence_sets_trip_and_position_and_clears(conn_with_clients):
+    a = add_order(conn_with_clients, D, "AARON", 3000)
+    b = add_order(conn_with_clients, D, "BETO", 500)
+    set_sequence(conn_with_clients, "V1", [[], [int(b.order_id), int(a.order_id)]])
+    assert get_locks(conn_with_clients, D) == {a.order_id: ("V1", 1), b.order_id: ("V1", 1)}
+    assert get_positions(conn_with_clients, D) == {b.order_id: 1, a.order_id: 2}
+    set_lock(conn_with_clients, int(a.order_id), "V2")  # cambiar de camión quita la posición
+    assert get_positions(conn_with_clients, D) == {b.order_id: 1}
+    clear_sequence(conn_with_clients, D, "V1")
+    assert get_locks(conn_with_clients, D) == {a.order_id: ("V2", None)}
+
+
+def test_old_locks_table_is_migrated(tmp_path):
+    import sqlite3
+    path = tmp_path / "viejo.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        "CREATE TABLE clients (code TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,"
+        " lat REAL, lon REAL, location_status TEXT NOT NULL);"
+        "CREATE TABLE orders (id INTEGER PRIMARY KEY, plan_date TEXT NOT NULL,"
+        " client_code TEXT NOT NULL REFERENCES clients(code), kg INTEGER NOT NULL,"
+        " UNIQUE (plan_date, client_code));"
+        "CREATE TABLE locks (order_id INTEGER PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,"
+        " vehicle_id TEXT NOT NULL, trip_no INTEGER NOT NULL);"
+        "INSERT INTO clients VALUES ('AARON', 'Aaron', '', 25.5, -103.4, 'verificada');"
+        f"INSERT INTO orders VALUES (1, '{D.isoformat()}', 'AARON', 3000);"
+        "INSERT INTO locks VALUES (1, 'V2', 2);"
+    )
+    old.commit(); old.close()
+    conn = connect(path)
+    assert get_locks(conn, D) == {"1": ("V2", 2)}
+    set_lock(conn, 1, "V3")
+    assert get_locks(conn, D) == {"1": ("V3", None)}
+
+
+def test_old_orders_table_gets_window_columns(tmp_path):
+    import sqlite3
+    path = tmp_path / "viejo2.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        "CREATE TABLE clients (code TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,"
+        " lat REAL, lon REAL, location_status TEXT NOT NULL);"
+        "CREATE TABLE orders (id INTEGER PRIMARY KEY, plan_date TEXT NOT NULL,"
+        " client_code TEXT NOT NULL REFERENCES clients(code), kg INTEGER NOT NULL,"
+        " UNIQUE (plan_date, client_code));"
+        "INSERT INTO clients VALUES ('AARON', 'Aaron', '', 25.5, -103.4, 'verificada');"
+        f"INSERT INTO orders VALUES (1, '{D.isoformat()}', 'AARON', 3000);"
+    )
+    old.commit(); old.close()
+    conn = connect(path)
+    (o,) = list_orders(conn, D)
+    assert (o.kg, o.window_start, o.window_end) == (3000, None, None)
+
+
+def test_old_clients_table_gets_default_hours(tmp_path):
+    import sqlite3
+    path = tmp_path / "viejo3.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        "CREATE TABLE clients (code TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,"
+        " lat REAL, lon REAL, location_status TEXT NOT NULL);"
+        "INSERT INTO clients VALUES ('AARON', 'Aaron', '', 25.5, -103.4, 'verificada');"
+    )
+    old.commit(); old.close()
+    c = list_clients(connect(path))["AARON"]
+    assert (c.opens_at, c.closes_at) == (9 * 60, 18 * 60)
+
+
+def test_blocked_trucks_persist(conn):
+    c = Client("X", "X", "", None, LocationStatus.PENDIENTE, blocked_vehicles=("Volvo", "Leña"))
+    upsert_client(conn, c)
+    assert get_client(conn, "X").blocked_vehicles == ("Leña", "Volvo")
+
+
+def test_puesta_persists(conn):
+    upsert_client(conn, Client("X", "X", "", None, LocationStatus.PENDIENTE, puesta=True))
+    assert get_client(conn, "X").puesta is True

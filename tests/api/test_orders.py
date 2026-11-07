@@ -91,7 +91,7 @@ def test_lock_validation_and_cascade(client):
     r = client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2", "trip_no": 4})
     assert r.status_code == 422 and r.json()["detail"] == "el viaje debe estar entre 1 y 3"
     assert client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2", "trip_no": 2}).status_code == 200
-    assert client.get(f"/api/orders?date={D}").json()[0]["lock"] == {"vehicle_id": "V2", "trip_no": 2}
+    assert client.get(f"/api/orders?date={D}").json()[0]["lock"] == {"vehicle_id": "V2", "trip_no": 2, "position": None}
     assert client.delete(f"/api/orders/{o['id']}").status_code == 204
     assert client.get(f"/api/orders?date={D}").json() == []
 
@@ -119,3 +119,96 @@ def test_order_writes_notify_their_date(client):
     client.delete(f"/api/orders/{o['id']}")
     client.post("/api/orders/scenario", json={"date": D, "name": "ligero"})
     assert calls == [day] * 6
+
+
+def test_lock_truck_only(client):
+    o = add(client).json()
+    r = client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2"})
+    assert r.status_code == 200
+    assert client.get(f"/api/orders?date={D}").json()[0]["lock"] == {
+        "vehicle_id": "V2", "trip_no": None, "position": None,
+    }
+
+
+def test_sequence_endpoint(client):
+    a = add(client).json()
+    b = add(client, code="BETO", kg=500).json()
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V1", "trips": [[b["id"], a["id"]]]})
+    assert r.status_code == 204
+    locks = {o["id"]: o["lock"] for o in client.get(f"/api/orders?date={D}").json()}
+    assert locks[b["id"]] == {"vehicle_id": "V1", "trip_no": 1, "position": 1}
+    assert locks[a["id"]] == {"vehicle_id": "V1", "trip_no": 1, "position": 2}
+    assert client.delete(f"/api/orders/sequence?date={D}&vehicle_id=V1").status_code == 204
+    assert all(o["lock"] is None for o in client.get(f"/api/orders?date={D}").json())
+
+
+@pytest.mark.parametrize("trips,detail", [
+    ([[]], "no trae pedidos"),
+    ([[1, 1]], "más de una vez"),
+    ([[999]], "no son de ese día"),
+    ([[1], [2], [3], [4]], "a lo más"),
+])
+def test_sequence_rejects_bad_input(client, trips, detail):
+    add(client)
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V1", "trips": trips})
+    assert r.status_code == 422 and detail in r.json()["detail"]
+
+
+def test_sequence_unknown_truck(client):
+    o = add(client).json()
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "XX", "trips": [[o["id"]]]})
+    assert r.status_code == 422
+
+
+def test_order_with_delivery_window(client):
+    r = client.post("/api/orders", json={"date": D, "client_code": "AARON", "kg": 3000,
+                                         "window_start": 60, "window_end": 120})
+    assert r.status_code == 201
+    assert (r.json()["window_start"], r.json()["window_end"]) == (60, 120)
+
+
+def test_window_must_be_ordered(client):
+    r = client.post("/api/orders", json={"date": D, "client_code": "AARON", "kg": 3000,
+                                         "window_start": 120, "window_end": 60})
+    assert r.status_code == 422 and r.json()["detail"] == "el horario de entrega debe empezar antes de terminar"
+
+
+def test_patch_window_and_kg_independently(client):
+    o = add(client).json()
+    r = client.patch(f"/api/orders/{o['id']}", json={"window_start": None, "window_end": 90})
+    assert (r.json()["kg"], r.json()["window_start"], r.json()["window_end"]) == (3000, None, 90)
+    r = client.patch(f"/api/orders/{o['id']}", json={"kg": 500})
+    assert (r.json()["kg"], r.json()["window_end"]) == (500, 90)  # cambiar kilos no borra el horario
+    r = client.patch(f"/api/orders/{o['id']}", json={"window_start": None, "window_end": None})
+    assert r.json()["window_end"] is None
+    assert client.patch(f"/api/orders/{o['id']}", json={}).status_code == 422
+
+
+def test_adding_to_existing_order_keeps_window_unless_new_one(client):
+    client.post("/api/orders", json={"date": D, "client_code": "AARON", "kg": 100, "window_end": 90})
+    r = add(client, kg=50).json()
+    assert (r["kg"], r["window_end"]) == (150, 90)
+    r = client.post("/api/orders", json={"date": D, "client_code": "AARON", "kg": 50, "window_start": 200}).json()
+    assert (r["kg"], r["window_start"], r["window_end"]) == (200, 200, None)
+
+
+def test_order_window_must_fit_client_hours(client):
+    client.patch("/api/clients/AARON", json={"opens_at": "10:00", "closes_at": "14:00"})
+    ok = client.post("/api/orders", json={"date": D, "client_code": "AARON", "kg": 100,
+                                          "window_start": 60, "window_end": 300})  # 10:00 a 14:00
+    assert ok.status_code == 201
+    for window in ({"window_start": 30}, {"window_end": 330}, {"window_start": 300}):
+        r = client.patch(f"/api/orders/{ok.json()['id']}", json={"window_start": None, "window_end": None, **window})
+        assert r.status_code == 422 and "recibe de 10:00 a 14:00" in r.json()["detail"], window
+    r = client.post("/api/orders", json={"date": D, "client_code": "BETO", "kg": 100, "window_end": 600})
+    assert r.status_code == 422  # 19:00, después de que cierra a las 18:00
+
+
+def test_cannot_lock_on_truck_that_does_not_fit(client):
+    client.patch("/api/clients/AARON", json={"blocked_vehicles": ["V2"]})
+    o = add(client).json()
+    r = client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2"})
+    assert r.status_code == 422 and "no puede entrar" in r.json()["detail"]
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V2", "trips": [[o["id"]]]})
+    assert r.status_code == 422 and "no puede entrar" in r.json()["detail"]
+    assert client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V1"}).status_code == 200

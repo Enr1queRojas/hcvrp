@@ -6,7 +6,10 @@ import random
 import sys
 from pathlib import Path
 
-from hcvrp.domain import Client, Location, LocationStatus
+from hcvrp.domain import (
+    DEFAULT_CLOSES_AT, DEFAULT_OPENS_AT, Client, Location, LocationStatus, clock_to_minutes,
+    minutes_to_clock,
+)
 
 KEEP_WITH_ADDRESS: frozenset[str] = frozenset({
     "A.ESPARZA", "A.ESPARZA3", "AARON", "ABSALON", "ADAN", "ADRIAN", "ANTUNEZ",
@@ -56,6 +59,10 @@ def save_clients(clients: list[Client], path: Path) -> None:
             "lat": c.location.lat if c.location else None,
             "lon": c.location.lon if c.location else None,
             "location_status": c.location_status.value,
+            "opens_at": minutes_to_clock(c.opens_at),
+            "closes_at": minutes_to_clock(c.closes_at),
+            "blocked_vehicles": list(c.blocked_vehicles),
+            "puesta": c.puesta,
         }
         for c in clients
     ]
@@ -73,6 +80,10 @@ def load_clients(path: Path) -> dict[str, Client]:
         out[d["code"]] = Client(
             code=d["code"], name=d["name"], address=d["address"],
             location=loc, location_status=LocationStatus(d["location_status"]),
+            opens_at=clock_to_minutes(d.get("opens_at") or minutes_to_clock(DEFAULT_OPENS_AT)),
+            closes_at=clock_to_minutes(d.get("closes_at") or minutes_to_clock(DEFAULT_CLOSES_AT)),
+            blocked_vehicles=tuple(d.get("blocked_vehicles") or ()),
+            puesta=bool(d.get("puesta", False)),
         )
     return out
 

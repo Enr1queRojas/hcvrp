@@ -1,33 +1,66 @@
 from __future__ import annotations
 
 from hcvrp.domain import (
-    LocationStatus, Order, Params, Plan, Problem, Stop, Trip, Unserved, VehiclePlan,
+    SHIFT_START_MIN, Client, LocationStatus, Order, Params, Plan, Problem, Stop, Trip, Unserved,
+    VehiclePlan,
 )
 
 DEPOT_KEY = "DEPOT"
 
 
-def build_trip(trip_no: int, start_min: int, orders: list[Order], matrix, params: Params) -> Trip:
+def service_bounds(order: Order, client: Client | None, params: Params) -> tuple[int, int | None]:
+    """(inicio más temprano, inicio más tardío) de la entrega, en minutos de jornada.
+
+    Combina el "desde" del pedido con el horario del cliente; ambos son firmes. El inicio más
+    tardío deja tiempo para terminar la entrega antes de que cierre. None: sin límite.
+    """
+    earliest = order.window_start or 0
+    latest = None
+    if client is not None:
+        earliest = max(earliest, client.opens_at - SHIFT_START_MIN)
+        latest = client.closes_at - SHIFT_START_MIN - params.service_minutes
+    return earliest, latest
+
+
+def build_trip(
+    trip_no: int,
+    start_min: int,
+    orders: list[Order],
+    matrix,
+    params: Params,
+    clients: dict[str, Client] | None = None,
+) -> Trip:
     prev, t, km = DEPOT_KEY, start_min, 0.0
     stops: list[Stop] = []
     for o in orders:
-        arrival = t + matrix.minutes(prev, o.client_code)
+        reached = t + matrix.minutes(prev, o.client_code)
+        earliest, _ = service_bounds(o, (clients or {}).get(o.client_code), params)
+        arrival = max(reached, earliest)  # si llega antes de que se pueda entregar, espera
         t = arrival + params.service_minutes
         km += matrix.km(prev, o.client_code)
-        stops.append(Stop(o.order_id, o.client_code, o.kg, arrival, t))
+        stops.append(Stop(
+            o.order_id, o.client_code, o.kg, arrival, t,
+            wait_min=arrival - reached, window_start=o.window_start, window_end=o.window_end,
+        ))
         prev = o.client_code
     end = t + matrix.minutes(prev, DEPOT_KEY)
     km += matrix.km(prev, DEPOT_KEY)
     return Trip(trip_no, start_min, end, km, tuple(stops))
 
 
-def build_vehicle_plan(vehicle_id: str, trips: list[list[Order]], matrix, params: Params) -> VehiclePlan:
+def build_vehicle_plan(
+    vehicle_id: str,
+    trips: list[list[Order]],
+    matrix,
+    params: Params,
+    clients: dict[str, Client] | None = None,
+) -> VehiclePlan:
     built: list[Trip] = []
     start = 0
     for orders in trips:
         if not orders:
             continue
-        trip = build_trip(len(built) + 1, start, orders, matrix, params)
+        trip = build_trip(len(built) + 1, start, orders, matrix, params, clients)
         built.append(trip)
         start = trip.end_min + params.reload_minutes
     return VehiclePlan(vehicle_id, tuple(built))

@@ -1,7 +1,19 @@
 from __future__ import annotations
 
-from hcvrp.domain import Location, Order, Problem, Unserved, UnservedReason
+from hcvrp.domain import Location, Order, Problem, Unserved, UnservedReason, puesta_amounts
 from hcvrp.geo.matrix import Matrix
+from hcvrp.schedule import service_bounds
+
+
+def _merge_window(a: Order, b: Order) -> tuple[int | None, int | None]:
+    """Horario común de dos pedidos del mismo cliente; si no se traslapan, gana el primero."""
+    starts = [w for w in (a.window_start, b.window_start) if w is not None]
+    ends = [w for w in (a.window_end, b.window_end) if w is not None]
+    start = max(starts) if starts else None
+    end = min(ends) if ends else None
+    if start is not None and end is not None and start >= end:
+        return a.window_start, a.window_end
+    return start, end
 
 
 def merge_orders(orders: list[Order]) -> list[Order]:
@@ -12,7 +24,8 @@ def merge_orders(orders: list[Order]) -> list[Order]:
         if prev is None:
             merged[o.client_code] = o
         else:
-            merged[o.client_code] = Order(prev.order_id, prev.client_code, prev.kg + o.kg)
+            start, end = _merge_window(prev, o)
+            merged[o.client_code] = Order(prev.order_id, prev.client_code, prev.kg + o.kg, start, end)
     return list(merged.values())
 
 
@@ -34,6 +47,7 @@ def _check_locks(problem: Problem, merged: list[Order]) -> None:
     for o in problem.orders:
         survivor_by_original[o.order_id] = first_by_client[o.client_code]
     max_trips = problem.params.max_trips_per_vehicle
+    client_of = {o.order_id: o.client_code for o in merged}
     for order_id, (vehicle_id, trip_no) in problem.locks.items():
         if order_id not in surviving:
             if order_id in survivor_by_original:
@@ -45,12 +59,22 @@ def _check_locks(problem: Problem, merged: list[Order]) -> None:
         vehicle = vehicles.get(vehicle_id)
         if vehicle is None:
             raise ValueError(f"lock on order {order_id!r}: unknown vehicle {vehicle_id!r}")
+        client = problem.clients.get(client_of.get(order_id, ""))
+        if client is not None and not client.can_receive(vehicle_id):
+            raise ValueError(
+                f"bloqueo imposible: el camión {vehicle_id!r} no puede entrar con el cliente "
+                f"{client.code!r} y el pedido {order_id!r} está bloqueado en él"
+            )
         if not vehicle.available:
             raise ValueError(f"lock on order {order_id!r}: vehicle {vehicle_id!r} is unavailable")
-        if not 1 <= trip_no <= max_trips:
+        if trip_no is not None and not 1 <= trip_no <= max_trips:
             raise ValueError(
                 f"lock on order {order_id!r}: trip_no {trip_no} outside 1..{max_trips}"
             )
+    for order_id in problem.positions:
+        lock = problem.locks.get(order_id)
+        if lock is None or lock[1] is None:
+            raise ValueError(f"position on order {order_id!r} without a (vehicle, trip) lock")
 
 
 def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserved]]:
@@ -61,19 +85,30 @@ def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserv
             raise ValueError(f"unknown client code {o.client_code!r} in order {o.order_id!r}")
     _check_locks(problem, merged)
 
-    caps = [v.capacity_kg for v in problem.vehicles if v.available]
-    max_cap = max(caps) if caps else None  # sin flota: lo reporta el solver (saturacion)
+    available = [v for v in problem.vehicles if v.available]
     params = problem.params
     planeable: list[Order] = []
     unserved: list[Unserved] = []
     for o in merged:
         client = problem.clients[o.client_code]
+        fits = [v.capacity_kg for v in available if client.can_receive(v.vehicle_id)]
         if client.location is None:
             reason = UnservedReason.SIN_COORDENADAS
-        elif max_cap is not None and o.kg > max_cap:
+        elif available and not fits:
+            reason = UnservedReason.NINGUN_CAMION_ENTRA
+        elif fits and o.kg > max(fits) and not (
+            client.puesta and o.order_id not in problem.locks
+            and any(a <= max(fits) for a in puesta_amounts(o.kg))
+        ):
+            # Con puesta, un pedido más grande que cualquier camión todavía puede llevarse en parte.
             reason = UnservedReason.EXCEDE_CAPACIDAD
         elif (
-            matrix.minutes("DEPOT", client.code)
+            (bounds := service_bounds(o, client, params))[1] is not None
+            and max(matrix.minutes("DEPOT", client.code), bounds[0]) > bounds[1]
+        ):
+            reason = UnservedReason.FUERA_HORARIO_CLIENTE
+        elif (
+            max(matrix.minutes("DEPOT", client.code), bounds[0])
             + params.service_minutes
             + matrix.minutes(client.code, "DEPOT")
             > params.shift_minutes
@@ -86,8 +121,9 @@ def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserv
     for u in unserved:
         if u.order_id in problem.locks:
             vehicle_id, trip_no = problem.locks[u.order_id]
+            where = f"el camión {vehicle_id!r}" + (f", viaje {trip_no}" if trip_no else "")
             raise ValueError(
                 f"bloqueo imposible: el pedido {u.order_id!r} no se puede servir "
-                f"({u.reason.value}) y está bloqueado en el camión {vehicle_id!r}, viaje {trip_no}"
+                f"({u.reason.value}) y está bloqueado en {where}"
             )
     return planeable, unserved

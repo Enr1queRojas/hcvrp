@@ -1,9 +1,11 @@
 import pytest
 
 from hcvrp.domain import (
-    DEFAULT_FLEET, DEPOT, Client, Location, LocationStatus, Order, Params, Problem,
+    DEPOT, Client, Location, LocationStatus, Order, Params, Problem,
 )
 from hcvrp.schedule import build_vehicle_plan, summarize
+
+from fleets import TEST_FLEET
 
 
 class TinyMatrix:
@@ -35,7 +37,7 @@ def problem_ab():
         for c in ("A", "B")
     }
     orders = [Order("o1", "A", 3000), Order("o2", "B", 4000)]
-    return Problem(DEPOT, clients, list(DEFAULT_FLEET), orders, Params())
+    return Problem(DEPOT, clients, list(TEST_FLEET), orders, Params())
 
 
 @pytest.fixture
@@ -66,7 +68,7 @@ def problem_for(clients):
 
     def make(name: str) -> Problem:
         return Problem(
-            DEPOT, clients, list(DEFAULT_FLEET), generate_scenario(name, clients), Params(time_limit_s=5)
+            DEPOT, clients, list(TEST_FLEET), generate_scenario(name, clients), Params(time_limit_s=5)
         )
 
     return make

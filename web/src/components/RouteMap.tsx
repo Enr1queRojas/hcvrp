@@ -1,6 +1,6 @@
 import maplibregl, { Map as MapLibre, Marker, StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { hhmm, kg, truckColor } from "../format";
+import { hhmm, kg, tripColor, type ColorOf } from "../format";
 import type { Client, Config, VehiclePlan } from "../types";
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
@@ -28,10 +28,11 @@ type Props = {
   vehicles: VehiclePlan[];
   clients: Client[];
   depot: Config["depot"];
+  colorOf: ColorOf;
   only: string | null;
 };
 
-export function RouteMap({ vehicles, clients, depot, only }: Props) {
+export function RouteMap({ vehicles, clients, depot, colorOf, only }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MapLibre | null>(null);
   const drawn = useRef<{ layers: string[]; markers: Marker[] }>({ layers: [], markers: [] });
@@ -65,8 +66,9 @@ export function RouteMap({ vehicles, clients, depot, only }: Props) {
 
     for (const vehicle of vehicles) {
       if (only && vehicle.vehicle_id !== only) continue;
-      const color = truckColor(vehicle.vehicle_id);
+      const truck = colorOf(vehicle.vehicle_id);
       for (const trip of vehicle.trips) {
+        const color = tripColor(truck, trip.trip_no);
         if (trip.geometry.length > 1) {
           const id = `ruta-${vehicle.vehicle_id}-${trip.trip_no}`;
           map.addSource(id, {
@@ -110,7 +112,7 @@ export function RouteMap({ vehicles, clients, depot, only }: Props) {
 
     drawn.current = { layers, markers };
     map.fitBounds(bounds, { padding: 48, duration: 300, maxZoom: 14 });
-  }, [map, vehicles, clients, depot, only]);
+  }, [map, vehicles, clients, depot, colorOf, only]);
 
   return <div ref={container} className="map" role="img" aria-label="Mapa de las rutas de cada camión" />;
 }

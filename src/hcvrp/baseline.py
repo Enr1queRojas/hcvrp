@@ -6,14 +6,14 @@ from dataclasses import dataclass, replace
 from hcvrp.domain import Order, Plan, Problem, Unserved, UnservedReason
 from hcvrp.geo.matrix import DistanceProvider, Matrix
 from hcvrp.precheck import points_for, precheck
-from hcvrp.schedule import DEPOT_KEY, build_vehicle_plan, summarize
+from hcvrp.schedule import DEPOT_KEY, build_vehicle_plan, service_bounds, summarize
 from hcvrp.validate import validate
 
 
 def baseline_plan(problem: Problem, provider: DistanceProvider) -> tuple[Plan, Matrix]:
     """Vecino más cercano. La línea base es por definición libre de bloqueos: ignora
     `problem.locks` y se construye y valida contra el problema sin ellos."""
-    problem = replace(problem, locks={})
+    problem = replace(problem, locks={}, positions={})
     matrix = provider.matrix(points_for(problem))
     pending, unserved = precheck(problem, matrix)
     params = problem.params
@@ -31,25 +31,32 @@ def baseline_plan(problem: Problem, provider: DistanceProvider) -> tuple[Plan, M
                 for o in pending:
                     if load + o.kg > truck.capacity_kg:
                         continue
+                    client = problem.clients.get(o.client_code)
+                    if client is not None and not client.can_receive(truck.vehicle_id):
+                        continue
                     go = matrix.minutes(pos, o.client_code)
                     back = matrix.minutes(o.client_code, DEPOT_KEY)
-                    if t + go + params.service_minutes + back > params.shift_minutes:
+                    earliest, latest = service_bounds(o, problem.clients.get(o.client_code), params)
+                    begin = max(t + go, earliest)  # espera si llega antes de poder entregar
+                    if latest is not None and begin > latest:
+                        continue
+                    if begin + params.service_minutes + back > params.shift_minutes:
                         continue
                     if best is None or go < best[0]:
-                        best = (go, o)
+                        best = (go, o, begin)
                 if best is None:
                     break
-                go, o = best
+                go, o, begin = best
                 trip.append(o)
                 pending.remove(o)
                 load += o.kg
-                t += go + params.service_minutes
+                t = begin + params.service_minutes
                 pos = o.client_code
             if not trip:
                 break
             trips.append(trip)
             start = t + matrix.minutes(pos, DEPOT_KEY) + params.reload_minutes
-        vehicle_plans.append(build_vehicle_plan(truck.vehicle_id, trips, matrix, params))
+        vehicle_plans.append(build_vehicle_plan(truck.vehicle_id, trips, matrix, params, problem.clients))
 
     unserved = unserved + [Unserved(o.order_id, UnservedReason.SATURACION_FLOTA) for o in pending]
     plan = summarize(problem, vehicle_plans, unserved, matrix)

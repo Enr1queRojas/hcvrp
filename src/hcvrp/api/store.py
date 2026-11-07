@@ -19,7 +19,10 @@ class NotFound(Exception):
 
 def _client(row: sqlite3.Row) -> Client:
     location = None if row["lat"] is None or row["lon"] is None else Location(row["lat"], row["lon"])
-    return Client(row["code"], row["name"], row["address"], location, LocationStatus(row["location_status"]))
+    return Client(
+        row["code"], row["name"], row["address"], location, LocationStatus(row["location_status"]),
+        row["opens_at"], row["closes_at"], tuple(json.loads(row["blocked_vehicles"])), bool(row["puesta"]),
+    )
 
 
 def list_clients(conn: sqlite3.Connection) -> dict[str, Client]:
@@ -35,13 +38,16 @@ def get_client(conn: sqlite3.Connection, code: str) -> Client | None:
 def upsert_client(conn: sqlite3.Connection, client: Client) -> None:
     loc = client.location
     conn.execute(
-        "INSERT INTO clients (code, name, address, lat, lon, location_status) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
+        "INSERT INTO clients (code, name, address, lat, lon, location_status, opens_at, closes_at, "
+        "blocked_vehicles, puesta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (code) DO UPDATE SET name = excluded.name, address = excluded.address, "
-        "lat = excluded.lat, lon = excluded.lon, location_status = excluded.location_status",
+        "lat = excluded.lat, lon = excluded.lon, location_status = excluded.location_status, "
+        "opens_at = excluded.opens_at, closes_at = excluded.closes_at, "
+        "blocked_vehicles = excluded.blocked_vehicles, puesta = excluded.puesta",
         (
             client.code, client.name, client.address,
             loc.lat if loc else None, loc.lon if loc else None, client.location_status.value,
+            client.opens_at, client.closes_at, json.dumps(list(client.blocked_vehicles)), int(client.puesta),
         ),
     )
     conn.commit()
@@ -92,7 +98,7 @@ def set_params(conn: sqlite3.Connection, params: Params) -> None:
 
 
 def _order(row: sqlite3.Row) -> Order:
-    return Order(str(row["id"]), row["client_code"], row["kg"])
+    return Order(str(row["id"]), row["client_code"], row["kg"], row["window_start"], row["window_end"])
 
 
 def list_orders(conn: sqlite3.Connection, day: date) -> list[Order]:
@@ -102,13 +108,39 @@ def list_orders(conn: sqlite3.Connection, day: date) -> list[Order]:
     return [_order(r) for r in rows]
 
 
-def add_order(conn: sqlite3.Connection, day: date, client_code: str, kg: int) -> Order:
+def add_order(
+    conn: sqlite3.Connection,
+    day: date,
+    client_code: str,
+    kg: int,
+    window_start: int | None = None,
+    window_end: int | None = None,
+) -> Order:
+    """Si el cliente ya tiene pedido ese día, suma los kilos; un horario nuevo reemplaza al anterior."""
     row = conn.execute(
-        "INSERT INTO orders (plan_date, client_code, kg) VALUES (?, ?, ?) "
-        "ON CONFLICT (plan_date, client_code) DO UPDATE SET kg = kg + excluded.kg RETURNING *",
-        (day.isoformat(), client_code, kg),
+        "INSERT INTO orders (plan_date, client_code, kg, window_start, window_end) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT (plan_date, client_code) DO UPDATE SET kg = kg + excluded.kg, "
+        "window_start = CASE WHEN excluded.window_start IS NULL AND excluded.window_end IS NULL "
+        "  THEN window_start ELSE excluded.window_start END, "
+        "window_end = CASE WHEN excluded.window_start IS NULL AND excluded.window_end IS NULL "
+        "  THEN window_end ELSE excluded.window_end END "
+        "RETURNING *",
+        (day.isoformat(), client_code, kg, window_start, window_end),
     ).fetchone()
     conn.commit()
+    return _order(row)
+
+
+def set_order_window(
+    conn: sqlite3.Connection, order_id: int, window_start: int | None, window_end: int | None
+) -> Order:
+    row = conn.execute(
+        "UPDATE orders SET window_start = ?, window_end = ? WHERE id = ? RETURNING *",
+        (window_start, window_end, order_id),
+    ).fetchone()
+    conn.commit()
+    if row is None:
+        raise NotFound(order_id)
     return _order(row)
 
 
@@ -136,26 +168,66 @@ def replace_orders(conn: sqlite3.Connection, day: date, orders: list[tuple[str, 
     return list_orders(conn, day)
 
 
+def get_order(conn: sqlite3.Connection, order_id: int) -> Order | None:
+    row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    return None if row is None else _order(row)
+
+
 def order_day(conn: sqlite3.Connection, order_id: int) -> date | None:
     row = conn.execute("SELECT plan_date FROM orders WHERE id = ?", (order_id,)).fetchone()
     return None if row is None else date.fromisoformat(row["plan_date"])
 
 
-def get_locks(conn: sqlite3.Connection, day: date) -> dict[str, tuple[str, int]]:
-    rows = conn.execute(
-        "SELECT l.order_id, l.vehicle_id, l.trip_no FROM locks l "
+def _lock_rows(conn: sqlite3.Connection, day: date) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT l.order_id, l.vehicle_id, l.trip_no, l.position FROM locks l "
         "JOIN orders o ON o.id = l.order_id WHERE o.plan_date = ?",
         (day.isoformat(),),
     ).fetchall()
-    return {str(r["order_id"]): (r["vehicle_id"], r["trip_no"]) for r in rows}
 
 
-def set_lock(conn: sqlite3.Connection, order_id: int, vehicle_id: str, trip_no: int) -> None:
+def get_locks(conn: sqlite3.Connection, day: date) -> dict[str, tuple[str, int | None]]:
+    return {str(r["order_id"]): (r["vehicle_id"], r["trip_no"]) for r in _lock_rows(conn, day)}
+
+
+def get_positions(conn: sqlite3.Connection, day: date) -> dict[str, int]:
+    return {
+        str(r["order_id"]): r["position"]
+        for r in _lock_rows(conn, day)
+        if r["position"] is not None and r["trip_no"] is not None
+    }
+
+
+def set_lock(conn: sqlite3.Connection, order_id: int, vehicle_id: str, trip_no: int | None = None) -> None:
     conn.execute(
-        "INSERT OR REPLACE INTO locks (order_id, vehicle_id, trip_no) VALUES (?, ?, ?)",
+        "INSERT OR REPLACE INTO locks (order_id, vehicle_id, trip_no, position) VALUES (?, ?, ?, NULL)",
         (order_id, vehicle_id, trip_no),
     )
     conn.commit()
+
+
+def set_sequence(conn: sqlite3.Connection, vehicle_id: str, trips: list[list[int]]) -> None:
+    """Fija camión, viaje y posición de cada pedido según el orden dado (viajes vacíos se omiten)."""
+    rows = [
+        (order_id, vehicle_id, trip_no, position)
+        for trip_no, trip in enumerate((t for t in trips if t), start=1)
+        for position, order_id in enumerate(trip, start=1)
+    ]
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO locks (order_id, vehicle_id, trip_no, position) VALUES (?, ?, ?, ?)",
+            rows,
+        )
+
+
+def clear_sequence(conn: sqlite3.Connection, day: date, vehicle_id: str) -> None:
+    """Quita los bloqueos con orden a mano de ese camión en ese día."""
+    with conn:
+        conn.execute(
+            "DELETE FROM locks WHERE vehicle_id = ? AND position IS NOT NULL AND order_id IN "
+            "(SELECT id FROM orders WHERE plan_date = ?)",
+            (vehicle_id, day.isoformat()),
+        )
 
 
 def delete_lock(conn: sqlite3.Connection, order_id: int) -> None:

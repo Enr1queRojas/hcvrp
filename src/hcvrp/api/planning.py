@@ -61,6 +61,7 @@ def build_problem(conn: sqlite3.Connection, day: date) -> Problem:
         orders=store.list_orders(conn, day),
         params=store.get_params(conn),
         locks=store.get_locks(conn, day),
+        positions=store.get_positions(conn, day),
     )
 
 
@@ -74,6 +75,7 @@ def inputs_hash(problem: Problem, provider: str = "haversine") -> str:
         "orders": [dataclasses.asdict(o) for o in problem.orders],
         "params": dataclasses.asdict(problem.params),
         "locks": problem.locks,
+        "positions": problem.positions,
     }
     raw = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -85,7 +87,7 @@ def run_planning(problem: Problem, provider: DistanceProvider, geometry: Geometr
         baseline, _ = baseline_plan(problem, provider)
         lock_cost_diff = None
         if problem.locks:
-            free, _ = solve(dataclasses.replace(problem, locks={}), provider)
+            free, _ = solve(dataclasses.replace(problem, locks={}, positions={}), provider)
             lock_cost_diff = plan.cost_mxn - free.cost_mxn
             # Con tiempo limitado el plan libre puede salir peor que el bloqueado.
             if served_kg(plan) == served_kg(free):

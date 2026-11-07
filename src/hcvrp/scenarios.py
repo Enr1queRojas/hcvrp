@@ -43,18 +43,19 @@ def generate_scenario(name: str, clients: dict[str, Client], seed: int = 2026103
     if name not in SCENARIOS:
         raise ValueError(f"escenario desconocido: {name!r}; opciones: {SCENARIOS}")
     rng = random.Random(seed)
-    codes = sorted(clients)
+    # Solo clientes con ubicación: a los demás el plan no los puede rutear.
+    codes = sorted(code for code, c in clients.items() if c.location is not None)
     if name == "inviable":
         n = 20
         if len(codes) < n:
-            raise ValueError(f"se necesitan {n} clientes, hay {len(codes)}")
+            raise ValueError(f"se necesitan {n} clientes con ubicación, hay {len(codes)}")
         chosen = rng.sample(codes, n)
         kgs = [35_000] + [_round100(rng.uniform(12_000, 15_000)) for _ in range(n - 1)]
         rng.shuffle(kgs)
     else:
         n, target = _SPEC[name]
         if len(codes) < n:
-            raise ValueError(f"se necesitan {n} clientes, hay {len(codes)}")
+            raise ValueError(f"se necesitan {n} clientes con ubicación, hay {len(codes)}")
         chosen = rng.sample(codes, n)
         kgs = _sizes(rng, n, target)
     return [Order(f"{name}-{i:02d}", code, kg) for i, (code, kg) in enumerate(zip(chosen, kgs))]

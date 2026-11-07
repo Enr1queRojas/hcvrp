@@ -118,3 +118,22 @@ def test_inputs_hash_ignores_clients_without_orders(conn):
     other = dict(problem.clients)
     del other["BETO"]
     assert inputs_hash(replace(problem, clients=other)) == inputs_hash(problem)
+
+
+def test_plan_out_reports_puesta(conn):
+    """Un pedido más grande que cualquier camión, con puesta: se entrega una parte y el resto pasa a otro día."""
+    from dataclasses import replace as _replace
+
+    from hcvrp.api.planning import build_problem, run_planning
+    from hcvrp.api.store import add_order, get_client, upsert_client
+    from hcvrp.geo.matrix import HaversineProvider
+
+    code = next(iter(list_clients(conn)))
+    upsert_client(conn, _replace(get_client(conn, code), puesta=True))
+    add_order(conn, D, code, 40_000)
+    out = run_planning(build_problem(conn, D), HaversineProvider())
+    stop = next(s for v in out["vehicles"] for t in v["trips"] for s in t["stops"])
+    assert (stop["kg"], stop["ordered_kg"]) == (6_000, 40_000)
+    (u,) = out["unserved"]
+    assert (u["kg"], u["reason"]) == (34_000, "puesta_parcial")
+    assert out["summary"]["puesta_stops"] == 1 and out["summary"]["unserved_kg"] == 34_000

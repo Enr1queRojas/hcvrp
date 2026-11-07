@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from hcvrp.api.app import create_app
 from hcvrp.api.db import connect
 from hcvrp.api.planning import PlanningError, build_problem, inputs_hash, run_planning
-from hcvrp.api.settings import Settings, load_env
+from hcvrp.api.settings import Settings, load_env, normalize_base_path
 from hcvrp.api.store import add_order, set_lock
 from hcvrp.domain import DEPOT
 from hcvrp.geo.matrix import HaversineProvider
@@ -88,6 +88,29 @@ def test_spa_served_and_api_404_stays_json(settings, dist):
         assert c.get("/assets/a.js").text == "let a"
         r = c.get("/api/nada")
         assert r.status_code == 404 and r.headers["content-type"].startswith("application/json")
+
+
+def test_base_path_serves_everything_under_prefix(settings, dist):
+    with TestClient(create_app(replace(settings, web_dist=dist, base_path="/rutas"))) as c:
+        r = c.get("/rutas", follow_redirects=False)
+        assert r.status_code == 307 and r.headers["location"] == "/rutas/"
+        assert c.get("/", follow_redirects=False).headers["location"] == "/rutas/"
+        assert "hcvrp" in c.get("/rutas/").text
+        assert c.get("/rutas/assets/a.js").text == "let a"
+        assert c.get("/rutas/api/me").status_code == 401
+        assert c.get("/api/me").status_code == 404
+        r = c.post("/rutas/api/login", json=LOGIN_OK)
+        assert r.status_code == 200 and "path=/rutas" in r.headers["set-cookie"].lower()
+        assert c.get("/rutas/api/me").json() == {"username": "ana"}
+        r = c.get("/rutas/api/nada")
+        assert r.status_code == 404 and r.headers["content-type"].startswith("application/json")
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("", ""), ("/", ""), ("rutas", "/rutas"), ("/rutas/", "/rutas"), (" /rutas ", "/rutas"),
+])
+def test_normalize_base_path(raw, expected):
+    assert normalize_base_path(raw) == expected
 
 
 def test_no_dist_means_api_only(settings, tmp_path):

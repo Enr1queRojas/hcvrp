@@ -1,7 +1,66 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, setOnUnauthorized } from "./api";
-import { hhmm, kg, mxn, tomorrowISO } from "./format";
+import { api, ApiError, apiUrl, setOnUnauthorized } from "./api";
+import { clockToMinute, hhmm, kg, lockText, minuteToClock, mxn, tomorrowISO, tripColor, truckColors, windowText } from "./format";
+import { moveStop, shiftStop } from "./sequence";
 import { segments, tripLabel } from "./timeline";
+
+describe("orden de paradas", () => {
+  const trips = [["a", "b", "c"], ["d", "e"]];
+  it("mueve una parada antes o después de otra", () => {
+    expect(moveStop(trips, "c", "a", false)).toEqual([["c", "a", "b"], ["d", "e"]]);
+    expect(moveStop(trips, "a", "b", true)).toEqual([["b", "a", "c"], ["d", "e"]]);
+  });
+  it("pasa una parada a otro viaje y quita viajes vacíos", () => {
+    expect(moveStop(trips, "b", "e", true)).toEqual([["a", "c"], ["d", "e", "b"]]);
+    expect(moveStop([["a"], ["b"]], "a", "b", false)).toEqual([["a", "b"]]);
+  });
+  it("no cambia nada al soltar sobre sí misma", () => {
+    expect(moveStop(trips, "b", "b", true)).toBe(trips);
+  });
+  it("sube y baja con el teclado, cruzando entre viajes", () => {
+    expect(shiftStop(trips, "b", -1)).toEqual([["b", "a", "c"], ["d", "e"]]);
+    expect(shiftStop(trips, "c", 1)).toEqual([["a", "b"], ["c", "d", "e"]]);
+    expect(shiftStop(trips, "d", -1)).toEqual([["a", "b", "c", "d"], ["e"]]);
+    expect(shiftStop(trips, "a", -1)).toBe(trips);
+    expect(shiftStop(trips, "e", 1)).toBe(trips);
+  });
+  it("describe el bloqueo", () => {
+    expect(lockText({ vehicle_id: "Leña", trip_no: null, position: null })).toBe("Fijado en Leña");
+    expect(lockText({ vehicle_id: "Leña", trip_no: 2, position: 3 })).toBe("Fijado en Leña, viaje 2, parada 3");
+  });
+});
+
+describe("horarios de entrega", () => {
+  it("convierte la hora del reloj a minutos desde las 09:00 y de regreso", () => {
+    expect(clockToMinute("10:30")).toBe(90);
+    expect(clockToMinute("09:00")).toBe(0);
+    expect(clockToMinute("")).toBeNull();
+    expect(clockToMinute("08:59")).toBeNaN();
+    expect(minuteToClock(90)).toBe("10:30");
+    expect(minuteToClock(null)).toBe("");
+  });
+  it("describe el horario", () => {
+    expect(windowText(60, 180)).toBe("10:00 a 12:00");
+    expect(windowText(null, 120)).toBe("antes de las 11:00");
+    expect(windowText(240, null)).toBe("desde las 13:00");
+    expect(windowText(null, null)).toBe("");
+  });
+});
+
+describe("colores", () => {
+  it("da un color distinto a cada camión de la flota", () => {
+    const ids = ["Leña", "Soriano", "Corto", "Guinda", "Volvo", "Mercedes"];
+    const colorOf = truckColors(ids);
+    expect(new Set(ids.map(colorOf)).size).toBe(ids.length);
+    expect(colorOf("Desconocido")).toBe(colorOf("Desconocido"));
+  });
+  it("da un tono distinto a cada viaje del mismo camión", () => {
+    const base = truckColors(["Leña"])("Leña");
+    const shades = [1, 2, 3, 4].map((n) => tripColor(base, n));
+    expect(shades[0]).toBe(base);
+    expect(new Set(shades).size).toBe(4);
+  });
+});
 
 describe("format", () => {
   it("convierte minutos de jornada en hora del día", () => {
@@ -68,6 +127,13 @@ describe("api", () => {
   it("una respuesta 204 no es error", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     await expect(api("/api/orders/1", { method: "DELETE" })).resolves.toBeUndefined();
+  });
+  it("pide la API relativa a la página, para servir bajo /rutas/", async () => {
+    expect(apiUrl("/api/me")).toBe("api/me");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api("/api/me");
+    expect(fetchMock).toHaveBeenCalledWith("api/me", expect.anything());
   });
   it("sin red da un mensaje legible", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("failed"); }));
