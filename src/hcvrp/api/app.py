@@ -30,6 +30,8 @@ _FIELD_MESSAGES = {
     "code": "el código es obligatorio, de hasta 40 caracteres y sin /",
     "name": "el nombre es obligatorio, de hasta 120 caracteres",
     "trip_no": "el viaje debe ser 1 o mayor",
+    "window_start": "la hora de entrega no es válida",
+    "window_end": "la hora de entrega no es válida",
 }
 
 

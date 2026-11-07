@@ -19,7 +19,10 @@ class NotFound(Exception):
 
 def _client(row: sqlite3.Row) -> Client:
     location = None if row["lat"] is None or row["lon"] is None else Location(row["lat"], row["lon"])
-    return Client(row["code"], row["name"], row["address"], location, LocationStatus(row["location_status"]))
+    return Client(
+        row["code"], row["name"], row["address"], location, LocationStatus(row["location_status"]),
+        row["opens_at"], row["closes_at"],
+    )
 
 
 def list_clients(conn: sqlite3.Connection) -> dict[str, Client]:
@@ -35,13 +38,15 @@ def get_client(conn: sqlite3.Connection, code: str) -> Client | None:
 def upsert_client(conn: sqlite3.Connection, client: Client) -> None:
     loc = client.location
     conn.execute(
-        "INSERT INTO clients (code, name, address, lat, lon, location_status) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
+        "INSERT INTO clients (code, name, address, lat, lon, location_status, opens_at, closes_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (code) DO UPDATE SET name = excluded.name, address = excluded.address, "
-        "lat = excluded.lat, lon = excluded.lon, location_status = excluded.location_status",
+        "lat = excluded.lat, lon = excluded.lon, location_status = excluded.location_status, "
+        "opens_at = excluded.opens_at, closes_at = excluded.closes_at",
         (
             client.code, client.name, client.address,
             loc.lat if loc else None, loc.lon if loc else None, client.location_status.value,
+            client.opens_at, client.closes_at,
         ),
     )
     conn.commit()
@@ -92,7 +97,7 @@ def set_params(conn: sqlite3.Connection, params: Params) -> None:
 
 
 def _order(row: sqlite3.Row) -> Order:
-    return Order(str(row["id"]), row["client_code"], row["kg"])
+    return Order(str(row["id"]), row["client_code"], row["kg"], row["window_start"], row["window_end"])
 
 
 def list_orders(conn: sqlite3.Connection, day: date) -> list[Order]:
@@ -102,13 +107,39 @@ def list_orders(conn: sqlite3.Connection, day: date) -> list[Order]:
     return [_order(r) for r in rows]
 
 
-def add_order(conn: sqlite3.Connection, day: date, client_code: str, kg: int) -> Order:
+def add_order(
+    conn: sqlite3.Connection,
+    day: date,
+    client_code: str,
+    kg: int,
+    window_start: int | None = None,
+    window_end: int | None = None,
+) -> Order:
+    """Si el cliente ya tiene pedido ese día, suma los kilos; un horario nuevo reemplaza al anterior."""
     row = conn.execute(
-        "INSERT INTO orders (plan_date, client_code, kg) VALUES (?, ?, ?) "
-        "ON CONFLICT (plan_date, client_code) DO UPDATE SET kg = kg + excluded.kg RETURNING *",
-        (day.isoformat(), client_code, kg),
+        "INSERT INTO orders (plan_date, client_code, kg, window_start, window_end) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT (plan_date, client_code) DO UPDATE SET kg = kg + excluded.kg, "
+        "window_start = CASE WHEN excluded.window_start IS NULL AND excluded.window_end IS NULL "
+        "  THEN window_start ELSE excluded.window_start END, "
+        "window_end = CASE WHEN excluded.window_start IS NULL AND excluded.window_end IS NULL "
+        "  THEN window_end ELSE excluded.window_end END "
+        "RETURNING *",
+        (day.isoformat(), client_code, kg, window_start, window_end),
     ).fetchone()
     conn.commit()
+    return _order(row)
+
+
+def set_order_window(
+    conn: sqlite3.Connection, order_id: int, window_start: int | None, window_end: int | None
+) -> Order:
+    row = conn.execute(
+        "UPDATE orders SET window_start = ?, window_end = ? WHERE id = ? RETURNING *",
+        (window_start, window_end, order_id),
+    ).fetchone()
+    conn.commit()
+    if row is None:
+        raise NotFound(order_id)
     return _order(row)
 
 
@@ -134,6 +165,11 @@ def replace_orders(conn: sqlite3.Connection, day: date, orders: list[tuple[str, 
             [(day.isoformat(), code, kg) for code, kg in orders],
         )
     return list_orders(conn, day)
+
+
+def get_order(conn: sqlite3.Connection, order_id: int) -> Order | None:
+    row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    return None if row is None else _order(row)
 
 
 def order_day(conn: sqlite3.Connection, order_id: int) -> date | None:

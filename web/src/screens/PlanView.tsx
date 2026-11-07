@@ -3,7 +3,7 @@ import { api, messageOf } from "../api";
 import { RouteMap } from "../components/RouteMap";
 import { ShiftTimeline } from "../components/ShiftTimeline";
 import { TruckSheet } from "../components/TruckSheet";
-import { hhmm, kg, km, mxn, tripColor, truckColors } from "../format";
+import { hhmm, kg, km, mxn, tripColor, truckColors, windowText } from "../format";
 import { moveStop, shiftStop, type Trips } from "../sequence";
 import type { Client, Config, Order, Params, Plan, PlanStatus, Vehicle, VehiclePlan } from "../types";
 
@@ -198,6 +198,9 @@ export function PlanView({ date, status, config, onChanged }: Props) {
             <div><dt>Camiones usados</dt><dd>{plan.summary.vehicles_used}</dd></div>
             <div><dt>Se entrega</dt><dd>{kg(plan.summary.served_kg)}</dd></div>
             <div data-alert={plan.summary.unserved_kg > 0}><dt>Pasa a otro día</dt><dd>{kg(plan.summary.unserved_kg)}</dd></div>
+            {plan.summary.late_stops > 0 && (
+              <div data-alert="true"><dt>Entregas fuera de horario</dt><dd>{plan.summary.late_stops}</dd></div>
+            )}
           </dl>
           <p className="comparison">{comparisonText(plan)}</p>
           {plan.lock_cost_diff_mxn !== null && (
@@ -348,9 +351,22 @@ export function PlanView({ date, status, config, onChanged }: Props) {
                                     </button>
                                     {i + 1}
                                   </td>
-                                  <td><strong>{stop.client_code}</strong> <span className="muted">{stop.client_name}</span></td>
+                                  <td>
+                                    <strong>{stop.client_code}</strong> <span className="muted">{stop.client_name}</span>
+                                    {(stop.window_start !== null || stop.window_end !== null) && (
+                                      <span className="window-tag">Horario: {windowText(stop.window_start, stop.window_end)}</span>
+                                    )}
+                                  </td>
                                   <td className="num">{kg(stop.kg)}</td>
-                                  <td>{pending ? "…" : hhmm(stop.arrival_min)}</td>
+                                  <td>
+                                    {pending ? "…" : (
+                                      <>
+                                        <span data-late={stop.late_min > 0 || undefined}>{hhmm(stop.arrival_min)}</span>
+                                        {stop.late_min > 0 && <span className="late-tag">{stop.late_min} min tarde</span>}
+                                        {stop.wait_min > 0 && <span className="wait-tag">espera {stop.wait_min} min</span>}
+                                      </>
+                                    )}
+                                  </td>
                                   <td>{pending ? "…" : hhmm(stop.departure_min)}</td>
                                   <td>{assignment(stop.order_id, stop.client_name)}</td>
                                 </tr>

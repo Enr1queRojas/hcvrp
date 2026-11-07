@@ -16,6 +16,21 @@ class LocationStatus(StrEnum):
     VERIFICADA = "verificada"
 
 
+SHIFT_START_MIN = 9 * 60  # la jornada arranca a las 09:00; los minutos de jornada cuentan desde ahí
+DEFAULT_OPENS_AT = 9 * 60  # horario de recepción de los clientes, en minutos desde la medianoche
+DEFAULT_CLOSES_AT = 18 * 60
+
+
+def clock_to_minutes(value: str) -> int:
+    """De "HH:MM" a minutos desde la medianoche."""
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def minutes_to_clock(value: int) -> str:
+    return f"{value // 60:02d}:{value % 60:02d}"
+
+
 @dataclass(frozen=True)
 class Client:
     code: str
@@ -23,6 +38,16 @@ class Client:
     address: str
     location: Location | None
     location_status: LocationStatus
+    # Horario en que el cliente recibe, en minutos desde la medianoche. Es firme: la entrega
+    # debe empezar después de abrir y terminar antes de cerrar.
+    opens_at: int = DEFAULT_OPENS_AT
+    closes_at: int = DEFAULT_CLOSES_AT
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.opens_at < self.closes_at <= 24 * 60:
+            raise ValueError(
+                f"horario inválido para el cliente {self.code!r}: abre {self.opens_at}, cierra {self.closes_at}"
+            )
 
 
 @dataclass(frozen=True)
@@ -61,15 +86,38 @@ class Order:
     order_id: str
     client_code: str
     kg: int
+    # Horario de entrega opcional, en minutos desde el inicio de la jornada (09:00).
+    # window_start: no se entrega antes (el camión espera). window_end: se procura entregar a
+    # más tardar a esa hora; si no se puede, se entrega tarde y el plan lo marca.
+    window_start: int | None = None
+    window_end: int | None = None
 
     def __post_init__(self) -> None:
         if self.kg <= 0:
             raise ValueError(f"kg must be > 0 for order {self.order_id!r}, got {self.kg}")
+        for name in ("window_start", "window_end"):
+            value = getattr(self, name)
+            if value is not None and value < 0:
+                raise ValueError(f"{name} must be >= 0 for order {self.order_id!r}, got {value}")
+        if (
+            self.window_start is not None
+            and self.window_end is not None
+            and self.window_start >= self.window_end
+        ):
+            raise ValueError(
+                f"window_start must be before window_end for order {self.order_id!r}, "
+                f"got {self.window_start} >= {self.window_end}"
+            )
+
+    @property
+    def has_window(self) -> bool:
+        return self.window_start is not None or self.window_end is not None
 
 
 class UnservedReason(StrEnum):
     EXCEDE_CAPACIDAD = "excede_capacidad"
     NO_CABE_JORNADA = "no_cabe_jornada"
+    FUERA_HORARIO_CLIENTE = "fuera_horario_cliente"
     SIN_COORDENADAS = "sin_coordenadas"
     SATURACION_FLOTA = "saturacion_flota"
 
@@ -79,8 +127,16 @@ class Stop:
     order_id: str
     client_code: str
     kg: int
-    arrival_min: int
+    arrival_min: int  # inicio de la entrega (después de esperar, si llegó antes de su horario)
     departure_min: int
+    wait_min: int = 0  # minutos que esperó por llegar antes de window_start
+    window_start: int | None = None
+    window_end: int | None = None
+
+    @property
+    def late_min(self) -> int:
+        """Minutos de retraso respecto a window_end (0 si llegó a tiempo o no tiene horario)."""
+        return 0 if self.window_end is None else max(0, self.arrival_min - self.window_end)
 
 
 @dataclass(frozen=True)

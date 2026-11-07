@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hcvrp.domain import Plan, Problem
 from hcvrp.precheck import merge_orders
+from hcvrp.schedule import service_bounds
 
 DEPOT_KEY = "DEPOT"
 TOL = 0.01
@@ -62,8 +63,23 @@ def validate(problem: Problem, plan: Plan, matrix) -> list[str]:
             try:
                 prev, t, km = DEPOT_KEY, trip.start_min, 0.0
                 for s in trip.stops:
-                    arrival = t + matrix.minutes(prev, s.client_code)
+                    o = orders.get(s.order_id)
+                    reached = t + matrix.minutes(prev, s.client_code)
+                    earliest, latest = (
+                        service_bounds(o, problem.clients.get(s.client_code), params) if o else (0, None)
+                    )
+                    arrival = max(reached, earliest)
                     dep = arrival + params.service_minutes
+                    if latest is not None and arrival > latest:
+                        out.append(
+                            f"{tag}: la parada {s.order_id} se entrega fuera del horario del cliente "
+                            f"(empieza en el minuto {arrival}, a más tardar {latest})"
+                        )
+                    if s.wait_min != arrival - reached:
+                        out.append(
+                            f"{tag}: espera de la parada {s.order_id} no coincide "
+                            f"({s.wait_min}/{arrival - reached} min)"
+                        )
                     km += matrix.km(prev, s.client_code)
                     if s.arrival_min != arrival or s.departure_min != dep:
                         out.append(

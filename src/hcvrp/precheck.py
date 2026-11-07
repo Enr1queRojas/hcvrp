@@ -2,6 +2,18 @@ from __future__ import annotations
 
 from hcvrp.domain import Location, Order, Problem, Unserved, UnservedReason
 from hcvrp.geo.matrix import Matrix
+from hcvrp.schedule import service_bounds
+
+
+def _merge_window(a: Order, b: Order) -> tuple[int | None, int | None]:
+    """Horario común de dos pedidos del mismo cliente; si no se traslapan, gana el primero."""
+    starts = [w for w in (a.window_start, b.window_start) if w is not None]
+    ends = [w for w in (a.window_end, b.window_end) if w is not None]
+    start = max(starts) if starts else None
+    end = min(ends) if ends else None
+    if start is not None and end is not None and start >= end:
+        return a.window_start, a.window_end
+    return start, end
 
 
 def merge_orders(orders: list[Order]) -> list[Order]:
@@ -12,7 +24,8 @@ def merge_orders(orders: list[Order]) -> list[Order]:
         if prev is None:
             merged[o.client_code] = o
         else:
-            merged[o.client_code] = Order(prev.order_id, prev.client_code, prev.kg + o.kg)
+            start, end = _merge_window(prev, o)
+            merged[o.client_code] = Order(prev.order_id, prev.client_code, prev.kg + o.kg, start, end)
     return list(merged.values())
 
 
@@ -77,7 +90,12 @@ def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserv
         elif max_cap is not None and o.kg > max_cap:
             reason = UnservedReason.EXCEDE_CAPACIDAD
         elif (
-            matrix.minutes("DEPOT", client.code)
+            (bounds := service_bounds(o, client, params))[1] is not None
+            and max(matrix.minutes("DEPOT", client.code), bounds[0]) > bounds[1]
+        ):
+            reason = UnservedReason.FUERA_HORARIO_CLIENTE
+        elif (
+            max(matrix.minutes("DEPOT", client.code), bounds[0])
             + params.service_minutes
             + matrix.minutes(client.code, "DEPOT")
             > params.shift_minutes

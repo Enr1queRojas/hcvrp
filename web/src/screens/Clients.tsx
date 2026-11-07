@@ -17,8 +17,9 @@ export function Clients({ config, onChanged }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [onlyUnverified, setOnlyUnverified] = useState(false);
-  const [draft, setDraft] = useState({ code: "", name: "", address: "" });
-  const [edit, setEdit] = useState({ name: "", address: "" });
+  const blankDraft = { code: "", name: "", address: "", opens_at: "09:00", closes_at: "18:00" };
+  const [draft, setDraft] = useState(blankDraft);
+  const [edit, setEdit] = useState({ name: "", address: "", opens_at: "09:00", closes_at: "18:00" });
   const [error, setError] = useState("");
   const [map, setMap] = useState<MapLibre | null>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -33,8 +34,10 @@ export function Clients({ config, onChanged }: Props) {
   const current = clients.find((c) => c.code === selected) ?? null;
 
   useEffect(() => {
-    if (current) setEdit({ name: current.name, address: current.address });
-  }, [current?.code, current?.name, current?.address]);
+    if (current) {
+      setEdit({ name: current.name, address: current.address, opens_at: current.opens_at, closes_at: current.closes_at });
+    }
+  }, [current?.code, current?.name, current?.address, current?.opens_at, current?.closes_at]);
 
   const run = useCallback(async (action: () => Promise<unknown>) => {
     setError("");
@@ -116,7 +119,7 @@ export function Clients({ config, onChanged }: Props) {
     const code = draft.code.trim();
     const saved = await run(() => api("/api/clients", { method: "POST", body: { ...draft, code } }));
     if (saved) {
-      setDraft({ code: "", name: "", address: "" });
+      setDraft(blankDraft);
       setSelected(code);
     }
   };
@@ -175,6 +178,12 @@ export function Clients({ config, onChanged }: Props) {
           <label>Código<input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} required maxLength={40} /></label>
           <label>Nombre<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} required maxLength={120} /></label>
           <label>Dirección<input value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></label>
+          <fieldset className="window-field">
+            <legend>Recibe de</legend>
+            <input type="time" value={draft.opens_at} onChange={(e) => setDraft({ ...draft, opens_at: e.target.value })} required aria-label="Recibe desde" />
+            <span aria-hidden="true">a</span>
+            <input type="time" value={draft.closes_at} onChange={(e) => setDraft({ ...draft, closes_at: e.target.value })} required aria-label="Recibe hasta" />
+          </fieldset>
           <button type="submit">Agregar cliente</button>
         </form>
       </div>
@@ -197,6 +206,12 @@ export function Clients({ config, onChanged }: Props) {
             <h2>{current.code}</h2>
             <label>Nombre<input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} required maxLength={120} /></label>
             <label>Dirección<input value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></label>
+            <fieldset className="window-field">
+              <legend>Recibe de <span className="muted">(nunca se le entrega fuera de este horario)</span></legend>
+              <input type="time" value={edit.opens_at} onChange={(e) => setEdit({ ...edit, opens_at: e.target.value })} required aria-label={`${current.code} recibe desde`} />
+              <span aria-hidden="true">a</span>
+              <input type="time" value={edit.closes_at} onChange={(e) => setEdit({ ...edit, closes_at: e.target.value })} required aria-label={`${current.code} recibe hasta`} />
+            </fieldset>
             <div className="actions">
               <button type="submit">Guardar cambios</button>
               <button type="button" className="link danger" onClick={remove}>Borrar cliente</button>

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from hcvrp.api import store
 from hcvrp.api.auth import current_user, get_conn
 from hcvrp.api.schemas import ClientIn, ClientOut, ClientPatch, LocationIn, ParamsIO, VehicleIO
-from hcvrp.domain import Client, Location, LocationStatus, Params, Vehicle
+from hcvrp.domain import Client, Location, LocationStatus, Params, Vehicle, clock_to_minutes
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
@@ -32,7 +32,10 @@ def create_client(
 ) -> ClientOut:
     if store.get_client(conn, body.code) is not None:
         raise HTTPException(status_code=409, detail=f"ya existe el cliente {body.code}")
-    client = Client(body.code, body.name, body.address, None, LocationStatus.PENDIENTE)
+    client = Client(
+        body.code, body.name, body.address, None, LocationStatus.PENDIENTE,
+        clock_to_minutes(body.opens_at), clock_to_minutes(body.closes_at),
+    )
     store.upsert_client(conn, client)
     request.app.state.on_change(None)
     return ClientOut.of(client)
@@ -42,7 +45,14 @@ def create_client(
 def patch_client(
     code: str, body: ClientPatch, request: Request, conn: sqlite3.Connection = Depends(get_conn)
 ) -> ClientOut:
-    client = replace(_existing(conn, code), **body.model_dump(exclude_none=True))
+    changes = body.model_dump(exclude_none=True)
+    for field in ("opens_at", "closes_at"):
+        if field in changes:
+            changes[field] = clock_to_minutes(changes[field])
+    try:
+        client = replace(_existing(conn, code), **changes)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="el horario del cliente debe abrir antes de cerrar") from None
     store.upsert_client(conn, client)
     request.app.state.on_change(None)
     return ClientOut.of(client)

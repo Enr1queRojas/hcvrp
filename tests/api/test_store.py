@@ -164,3 +164,36 @@ def test_old_locks_table_is_migrated(tmp_path):
     assert get_locks(conn, D) == {"1": ("V2", 2)}
     set_lock(conn, 1, "V3")
     assert get_locks(conn, D) == {"1": ("V3", None)}
+
+
+def test_old_orders_table_gets_window_columns(tmp_path):
+    import sqlite3
+    path = tmp_path / "viejo2.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        "CREATE TABLE clients (code TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,"
+        " lat REAL, lon REAL, location_status TEXT NOT NULL);"
+        "CREATE TABLE orders (id INTEGER PRIMARY KEY, plan_date TEXT NOT NULL,"
+        " client_code TEXT NOT NULL REFERENCES clients(code), kg INTEGER NOT NULL,"
+        " UNIQUE (plan_date, client_code));"
+        "INSERT INTO clients VALUES ('AARON', 'Aaron', '', 25.5, -103.4, 'verificada');"
+        f"INSERT INTO orders VALUES (1, '{D.isoformat()}', 'AARON', 3000);"
+    )
+    old.commit(); old.close()
+    conn = connect(path)
+    (o,) = list_orders(conn, D)
+    assert (o.kg, o.window_start, o.window_end) == (3000, None, None)
+
+
+def test_old_clients_table_gets_default_hours(tmp_path):
+    import sqlite3
+    path = tmp_path / "viejo3.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        "CREATE TABLE clients (code TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,"
+        " lat REAL, lon REAL, location_status TEXT NOT NULL);"
+        "INSERT INTO clients VALUES ('AARON', 'Aaron', '', 25.5, -103.4, 'verificada');"
+    )
+    old.commit(); old.close()
+    c = list_clients(connect(path))["AARON"]
+    assert (c.opens_at, c.closes_at) == (9 * 60, 18 * 60)

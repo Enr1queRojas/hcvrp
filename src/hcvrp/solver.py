@@ -16,6 +16,14 @@ Bloqueos: (camión, viaje) fija ambos; (camión, None) solo el camión. El orden
 posición del mismo (camión, viaje), el rango debe crecer en el orden dado. Otros pedidos
 pueden quedar intercalados.
 
+Horarios de entrega (`Order.window_start/window_end`) y de recepción del cliente
+(`Client.opens_at/closes_at`): solo si alguno restringe de verdad, la dimensión de tiempo admite
+espera (holgura). El horario del cliente y `window_start` son firmes (el camión espera; nunca se
+agenda fuera de lo que el cliente recibe);
+`window_end` es blando: cada minuto tarde cuesta LATE_PENALTY_PER_MIN, y la penalización por
+descartar un pedido supera cualquier retraso posible, así que nunca se dejan kilos por cumplir
+un horario.
+
 Por construcción los viajes se usan en orden (t usado => t-1 usado) y no hay viajes
 vacíos intermedios (sin recarga justo al salir ni dos recargas seguidas); un viaje final
 vacío (recarga justo antes de cerrar) se descarta al armar el plan.
@@ -32,10 +40,12 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from hcvrp.domain import Order, Plan, Problem, Unserved, UnservedReason, Vehicle
 from hcvrp.geo.matrix import DistanceProvider, Matrix
 from hcvrp.precheck import points_for, precheck
-from hcvrp.schedule import DEPOT_KEY, build_vehicle_plan, summarize
+from hcvrp.schedule import DEPOT_KEY, build_vehicle_plan, service_bounds, summarize
 from hcvrp.validate import validate
 
 DROP_PENALTY_PER_KG = 100_000  # centavos por kg (1 000 MXN/kg)
+LATE_PENALTY_PER_MIN = 50_000  # centavos por minuto tarde (500 MXN/min): pesa más que un rodeo
+WAIT_COST_PER_MIN = 300  # centavos por minuto de espera (3 MXN/min): usar el hueco para otras entregas
 EXTRA_TRIP_COST = 10  # centavos por recarga; desempate: menos recargas
 
 
@@ -55,7 +65,8 @@ def solve(problem: Problem, provider: DistanceProvider) -> tuple[Plan, Matrix]:
         unserved = unserved + [Unserved(o.order_id, UnservedReason.SATURACION_FLOTA) for o in dropped]
 
     vehicle_plans = [
-        build_vehicle_plan(vid, trips, matrix, problem.params) for vid, trips in routes.items()
+        build_vehicle_plan(vid, trips, matrix, problem.params, problem.clients)
+        for vid, trips in routes.items()
     ]
     plan = summarize(problem, vehicle_plans, unserved, matrix)
     violations = validate(problem, plan, matrix)
@@ -166,7 +177,31 @@ def _route(
     time_cb = routing.RegisterTransitCallback(
         lambda i, j: time_table[manager.IndexToNode(i)][manager.IndexToNode(j)]
     )
-    routing.AddDimension(time_cb, 0, params.shift_minutes, True, "Time")
+    # Inicio de la entrega: [más temprano, más tardío] firme (pedido + cliente) y "hasta" blando.
+    bounds = {
+        node: service_bounds(o, problem.clients.get(o.client_code), params)
+        for node, o in enumerate(orders, start=1)
+    }
+    windowed = [
+        (node, o) for node, o in enumerate(orders, start=1)
+        if o.window_end is not None
+        or bounds[node][0] > 0
+        or (bounds[node][1] is not None and bounds[node][1] < params.shift_minutes)
+    ]
+    wait_max = params.shift_minutes if windowed else 0
+    routing.AddDimension(time_cb, wait_max, params.shift_minutes, True, "Time")
+    time_dim = routing.GetDimensionOrDie("Time")
+    if windowed:
+        time_dim.SetSlackCostCoefficientForAllVehicles(WAIT_COST_PER_MIN)
+    for node, o in windowed:
+        idx = manager.NodeToIndex(node)
+        earliest, latest = bounds[node]
+        if earliest > 0:
+            time_dim.CumulVar(idx).SetMin(min(earliest, params.shift_minutes))
+        if latest is not None and latest < params.shift_minutes:
+            time_dim.CumulVar(idx).SetMax(max(latest, 0))
+        if o.window_end is not None:
+            time_dim.SetCumulVarSoftUpperBound(idx, o.window_end, LATE_PENALTY_PER_MIN)
 
     # Contador de viajes: cumul en un pedido = número de viaje - 1.
     trip_inc = [1 if node in reload_owner else 0 for node in range(n_nodes)]
@@ -189,7 +224,7 @@ def _route(
     # cualquier costo posible de ruta (así un pedido de 1 kg nunca se descarta por costar más).
     route_cost_bound = max_arc * (n_nodes + 1) + sum(
         1 + round(t.fixed_dispatch_cost_mxn * 100) for t in trucks
-    )
+    ) + LATE_PENALTY_PER_MIN * params.shift_minutes * len(windowed)
     # Un pedido bloqueado cuesta más descartarlo que todos los libres juntos: la búsqueda nunca
     # cambia uno bloqueado por otros más pesados (y si queda fuera, el bloqueo era imposible).
     penalty = [o.kg * DROP_PENALTY_PER_KG + route_cost_bound for o in orders]

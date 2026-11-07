@@ -93,3 +93,22 @@ def test_client_with_orders_can_be_edited_and_located(client):
     assert client.put("/api/clients/AARON/location", json={"lat": 25.54, "lon": -103.41}).status_code == 200
     assert client.patch("/api/clients/AARON", json={"name": "Otro"}).status_code == 200
     assert client.get("/api/orders?date=2026-10-31").json()[0]["client_name"] == "Otro"
+
+
+def test_clients_have_default_hours(client):
+    c = client.get("/api/clients").json()[0]
+    assert (c["opens_at"], c["closes_at"]) == ("09:00", "18:00")
+
+
+def test_client_hours_can_change(client):
+    r = client.patch("/api/clients/AARON", json={"opens_at": "10:00", "closes_at": "14:30"})
+    assert r.status_code == 200 and (r.json()["opens_at"], r.json()["closes_at"]) == ("10:00", "14:30")
+    r = client.patch("/api/clients/AARON", json={"closes_at": "09:30"})  # cerraría antes de abrir
+    assert r.status_code == 422 and "abrir antes de cerrar" in r.json()["detail"]
+    r = client.patch("/api/clients/AARON", json={"opens_at": "25:00"})
+    assert r.status_code == 422
+
+
+def test_new_client_hours(client):
+    r = client.post("/api/clients", json={"code": "NUEVO", "name": "Nuevo", "opens_at": "08:00", "closes_at": "13:00"})
+    assert r.status_code == 201 and (r.json()["opens_at"], r.json()["closes_at"]) == ("08:00", "13:00")
