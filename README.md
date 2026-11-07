@@ -6,7 +6,7 @@ Planeador de reparto para Graneros Guerra. Para cambiar el logo, reemplaza
 
 ### Arranque
 .venv\Scripts\python -m hcvrp.api.seed --snap
-.venv\Scripts\python -m hcvrp.api.auth add-user ana
+.venv\Scripts\python -m hcvrp.api.auth add-user angely
 .venv\Scripts\python -m hcvrp.api
 
 A partir de cliente + kilos calcula qué
@@ -61,6 +61,7 @@ desde la raíz del repositorio.
 | `HCVRP_DEBOUNCE_S` | `1.5` | Espera para agrupar cambios antes de recalcular |
 | `HCVRP_WEB_DIST` | `web/dist` | Carpeta de la web compilada |
 | `HCVRP_HOST`, `PORT` | `127.0.0.1`, `8000` | Dirección del servidor |
+| `HCVRP_BASE_PATH` | vacío (raíz) | Prefijo cuando se publica bajo una ruta, p. ej. `/rutas` |
 
 Estas variables también se pueden poner en un archivo `.env` en la raíz, que se
 carga al arrancar. Está en `.gitignore`: nunca lo subas al repositorio.
@@ -68,6 +69,24 @@ carga al arrancar. Está en `.gitignore`: nunca lo subas al repositorio.
 Con `haversine` las distancias son línea recta por un factor de rodeo y la app lo
 avisa. Con `ors`, ajusta las ubicaciones sin verificar a la vía más cercana con
 `python -m hcvrp.api.seed --snap`.
+
+## Publicar en proadel.app/rutas con Cloudflare Tunnel
+
+La app sigue corriendo en esta máquina; el túnel la expone por HTTPS. En `.env`:
+
+```
+HCVRP_BASE_PATH=/rutas
+HCVRP_COOKIE_SECURE=1
+```
+
+En el túnel, agrega un *public hostname* `proadel.app` con ruta `rutas` (o
+`^/rutas`) hacia `http://127.0.0.1:8000`. Usa `127.0.0.1`, no `localhost`: el
+servidor solo escucha en IPv4 y confía en la IP del visitante que manda
+`cloudflared` solo si la conexión llega desde `127.0.0.1`. Cloudflare no quita el
+prefijo, y no debe hacerlo: el servidor ya atiende todo bajo `/rutas`.
+
+La web usa rutas relativas, así que la misma compilación sirve en la raíz o bajo
+el prefijo; `/rutas` sin diagonal final redirige a `/rutas/`.
 
 ## Desarrollo
 

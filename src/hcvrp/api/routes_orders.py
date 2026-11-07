@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from hcvrp.api import store
 from hcvrp.api.auth import current_user, get_conn
-from hcvrp.api.schemas import LockIO, OrderIn, OrderOut, OrderPatch, ScenarioIn
+from hcvrp.api.schemas import LockIO, LockOut, OrderIn, OrderOut, OrderPatch, ScenarioIn, SequenceIn
 from hcvrp.domain import Order
 from hcvrp.scenarios import SCENARIOS, generate_scenario
 
@@ -18,13 +18,16 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 def _orders_out(conn: sqlite3.Connection, day: Date, orders: list[Order]) -> list[OrderOut]:
     clients = store.list_clients(conn)
     locks = store.get_locks(conn, day)
+    positions = store.get_positions(conn, day)
     out = []
     for o in orders:
         lock = locks.get(o.order_id)
         out.append(OrderOut(
             id=int(o.order_id), date=day, client_code=o.client_code,
             client_name=clients[o.client_code].name, kg=o.kg,
-            lock=None if lock is None else LockIO(vehicle_id=lock[0], trip_no=lock[1]),
+            lock=None if lock is None else LockOut(
+                vehicle_id=lock[0], trip_no=lock[1], position=positions.get(o.order_id)
+            ),
         ))
     return out
 
@@ -48,6 +51,40 @@ def add_order(body: OrderIn, request: Request, conn: sqlite3.Connection = Depend
     order = store.add_order(conn, body.date, body.client_code, body.kg)
     request.app.state.on_change(body.date)
     return _orders_out(conn, body.date, [order])[0]
+
+
+@router.put("/orders/sequence", status_code=204)
+def set_sequence(body: SequenceIn, request: Request, conn: sqlite3.Connection = Depends(get_conn)) -> None:
+    """Fija el orden de entrega de un camión: cada pedido queda en ese camión, viaje y posición."""
+    fleet = {v.vehicle_id: v for v in store.get_fleet(conn)}
+    if body.vehicle_id not in fleet:
+        raise HTTPException(status_code=422, detail=f"no existe el camión {body.vehicle_id}")
+    if not fleet[body.vehicle_id].available:
+        raise HTTPException(status_code=422, detail=f"el camión {body.vehicle_id} no está disponible")
+    trips = [t for t in body.trips if t]
+    ids = [i for t in trips for i in t]
+    if not ids:
+        raise HTTPException(status_code=422, detail="el orden no trae pedidos")
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=422, detail="un pedido aparece más de una vez en el orden")
+    max_trips = store.get_params(conn).max_trips_per_vehicle
+    if len(trips) > max_trips:
+        raise HTTPException(status_code=422, detail=f"el camión puede hacer a lo más {max_trips} viajes")
+    day_ids = {int(o.order_id) for o in store.list_orders(conn, body.date)}
+    missing = [i for i in ids if i not in day_ids]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"los pedidos {missing} no son de ese día")
+    store.set_sequence(conn, body.vehicle_id, trips)
+    request.app.state.on_change(body.date)
+
+
+@router.delete("/orders/sequence", status_code=204)
+def clear_sequence(
+    date: Date, vehicle_id: str, request: Request, conn: sqlite3.Connection = Depends(get_conn)
+) -> None:
+    """Deja que el plan vuelva a decidir el orden de ese camión."""
+    store.clear_sequence(conn, date, vehicle_id)
+    request.app.state.on_change(date)
 
 
 @router.patch("/orders/{order_id}")
@@ -95,7 +132,7 @@ def set_lock(
     if body.vehicle_id not in {v.vehicle_id for v in store.get_fleet(conn)}:
         raise HTTPException(status_code=422, detail=f"no existe el camión {body.vehicle_id}")
     max_trips = store.get_params(conn).max_trips_per_vehicle
-    if body.trip_no > max_trips:
+    if body.trip_no is not None and body.trip_no > max_trips:
         raise HTTPException(status_code=422, detail=f"el viaje debe estar entre 1 y {max_trips}")
     store.set_lock(conn, order_id, body.vehicle_id, body.trip_no)
     request.app.state.on_change(day)

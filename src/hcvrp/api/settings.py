@@ -23,6 +23,7 @@ class Settings:
     debounce_s: float = 1.5
     session_days: int = 30
     web_dist: Path = Path("web/dist")
+    base_path: str = ""  # p. ej. "/rutas" cuando se publica en dominio/rutas
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -33,4 +34,11 @@ class Settings:
             cookie_secure=os.environ.get("HCVRP_COOKIE_SECURE", "").lower() in ("1", "true"),
             debounce_s=float(os.environ.get("HCVRP_DEBOUNCE_S", cls.debounce_s)),
             web_dist=Path(os.environ.get("HCVRP_WEB_DIST", str(cls.web_dist))),
+            base_path=normalize_base_path(os.environ.get("HCVRP_BASE_PATH", "")),
         )
+
+
+def normalize_base_path(value: str) -> str:
+    """'rutas', '/rutas/' y '/rutas' quedan como '/rutas'; vacío o '/' es la raíz."""
+    value = value.strip().strip("/")
+    return f"/{value}" if value else ""

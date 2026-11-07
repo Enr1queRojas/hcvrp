@@ -124,8 +124,25 @@ def validate(problem: Problem, plan: Plan, matrix) -> list[str]:
 
     for oid, (lv, lt) in problem.locks.items():
         got = placement.get(oid)
-        if got != (lv, lt):
+        if lt is None:
+            if got is None or got[0] != lv:
+                out.append(f"Pedido {oid}: bloqueo no respetado, debía ir en {lv}, quedó en {got}")
+        elif got != (lv, lt):
             out.append(f"Pedido {oid}: bloqueo no respetado, debía ir en {lv} viaje {lt}, quedó en {got}")
+
+    sequence = {
+        s.order_id: (vp.vehicle_id, trip.trip_no, i)
+        for vp in plan.vehicles for trip in vp.trips for i, s in enumerate(trip.stops)
+    }
+    by_trip: dict[tuple[str, int], list[tuple[int, str]]] = {}
+    for oid, pos in problem.positions.items():
+        if oid in sequence and problem.locks.get(oid) and problem.locks[oid][1] is not None:
+            by_trip.setdefault(problem.locks[oid], []).append((pos, oid))
+    for (lv, lt), items in by_trip.items():
+        wanted = [oid for _, oid in sorted(items)]
+        got = sorted(wanted, key=lambda oid: sequence[oid][2])
+        if got != wanted:
+            out.append(f"{lv} viaje {lt}: orden a mano no respetado, debía ser {wanted}, quedó {got}")
 
     reloads = total_trips - used
     if abs(plan.cost_mxn - cost) > TOL:

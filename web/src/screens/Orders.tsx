@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, messageOf } from "../api";
-import { kg } from "../format";
+import { kg, lockText } from "../format";
 import type { Client, Order } from "../types";
 
 type Props = { date: string; onChanged: () => void };
@@ -149,7 +149,7 @@ export function Orders({ date, onChanged }: Props) {
                       }}
                     />
                   </td>
-                  <td>{o.lock ? `Fijado en ${o.lock.vehicle_id}, viaje ${o.lock.trip_no}` : <span className="muted">La decide el plan</span>}</td>
+                  <td>{o.lock ? lockText(o.lock) : <span className="muted">La decide el plan</span>}</td>
                   <td className="num">
                     <button type="button" className="link danger" onClick={() => remove(o)}>
                       Borrar

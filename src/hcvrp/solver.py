@@ -11,6 +11,11 @@ bodega, solo visitables por k) con servicio = `reload_minutes`. Al pasar por uno
   lo que deja la carga en 0 para el siguiente viaje;
 * la dimensión "Trips" cuenta viajes (sirve para los bloqueos (camión, viaje)).
 
+Bloqueos: (camión, viaje) fija ambos; (camión, None) solo el camión. El orden a mano
+(`problem.positions`) usa una dimensión "Rank" que cuenta paradas: entre los pedidos con
+posición del mismo (camión, viaje), el rango debe crecer en el orden dado. Otros pedidos
+pueden quedar intercalados.
+
 Por construcción los viajes se usan en orden (t usado => t-1 usado) y no hay viajes
 vacíos intermedios (sin recarga justo al salir ni dos recargas seguidas); un viaje final
 vacío (recarga justo antes de cerrar) se descarta al armar el plan.
@@ -66,12 +71,36 @@ def _check_locks_honored(
     for order_id, (vehicle_id, trip_no) in problem.locks.items():
         if order_id not in planeable_ids:
             continue
-        trips = routes.get(vehicle_id, [])
-        if not (trip_no <= len(trips) and any(o.order_id == order_id for o in trips[trip_no - 1])):
+        trips = [t for t in routes.get(vehicle_id, []) if t]
+        if trip_no is None:
+            ok = any(o.order_id == order_id for t in trips for o in t)
+        else:
+            ok = trip_no <= len(trips) and any(o.order_id == order_id for o in trips[trip_no - 1])
+        if not ok:
+            where = f"el camión {vehicle_id!r}" + (f", viaje {trip_no}" if trip_no else "")
             raise ValueError(
-                f"bloqueo infeasible: el pedido {order_id!r} no pudo servirse en el camión "
-                f"{vehicle_id!r}, viaje {trip_no} (capacidad, jornada o viajes insuficientes)"
+                f"bloqueo infeasible: el pedido {order_id!r} no pudo servirse en "
+                f"{where} (capacidad, jornada o viajes insuficientes)"
             )
+    for vehicle_id, trip_no, wanted in _sequences(problem, planeable_ids):
+        trip = [t for t in routes.get(vehicle_id, []) if t][trip_no - 1]
+        got = [o.order_id for o in trip if o.order_id in set(wanted)]
+        if got != wanted:
+            raise ValueError(
+                f"bloqueo infeasible: el orden fijado a mano en el camión {vehicle_id!r}, "
+                f"viaje {trip_no} no se pudo respetar"
+            )
+
+
+def _sequences(problem: Problem, order_ids: set[str]) -> list[tuple[str, int, list[str]]]:
+    """(camión, viaje, pedidos en el orden fijado) para cada viaje con orden a mano."""
+    groups: dict[tuple[str, int], list[tuple[int, str]]] = {}
+    for order_id, position in problem.positions.items():
+        if order_id not in order_ids:
+            continue
+        vehicle_id, trip_no = problem.locks[order_id]
+        groups.setdefault((vehicle_id, trip_no), []).append((position, order_id))
+    return [(v, t, [oid for _, oid in sorted(items)]) for (v, t), items in groups.items() if len(items) > 1]
 
 
 def _route(
@@ -161,10 +190,13 @@ def _route(
     route_cost_bound = max_arc * (n_nodes + 1) + sum(
         1 + round(t.fixed_dispatch_cost_mxn * 100) for t in trucks
     )
+    # Un pedido bloqueado cuesta más descartarlo que todos los libres juntos: la búsqueda nunca
+    # cambia uno bloqueado por otros más pesados (y si queda fuera, el bloqueo era imposible).
+    penalty = [o.kg * DROP_PENALTY_PER_KG + route_cost_bound for o in orders]
+    locked_extra = sum(penalty)
     for node, o in enumerate(orders, start=1):
-        routing.AddDisjunction(
-            [manager.NodeToIndex(node)], o.kg * DROP_PENALTY_PER_KG + route_cost_bound
-        )
+        extra = locked_extra if o.order_id in problem.locks else 0
+        routing.AddDisjunction([manager.NodeToIndex(node)], penalty[node - 1] + extra)
 
     # Bloqueos (camión, viaje).
     node_of = {o.order_id: node for node, o in enumerate(orders, start=1)}
@@ -173,13 +205,38 @@ def _route(
         if order_id in node_of:
             idx = manager.NodeToIndex(node_of[order_id])
             _allow_only(routing, idx, vehicle_of[vehicle_id])
-            trips_dim.CumulVar(idx).SetRange(trip_no - 1, trip_no - 1)
+            if trip_no is not None:
+                trips_dim.CumulVar(idx).SetRange(trip_no - 1, trip_no - 1)
+
+    # Orden a mano: el rango (paradas contadas desde la salida) crece en el orden fijado.
+    sequences = _sequences(problem, set(node_of))
+    if sequences:
+        rank_cb = routing.RegisterUnaryTransitCallback(lambda i: 1)
+        routing.AddDimension(rank_cb, 0, n_nodes + 1, True, "Rank")
+        rank = routing.GetDimensionOrDie("Rank")
+        solver = routing.solver()
+        for _, _, wanted in sequences:
+            idxs = [manager.NodeToIndex(node_of[oid]) for oid in wanted]
+            for a, b in zip(idxs, idxs[1:]):
+                solver.Add(rank.CumulVar(a) < rank.CumulVar(b))
 
     search = pywrapcp.DefaultRoutingSearchParameters()
     search.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     search.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     search.time_limit.seconds = params.time_limit_s
-    solution = routing.SolveWithParameters(search)
+    solution = None
+    if sequences:
+        # La primera solución voraz no ve las restricciones de orden y descarta esos pedidos;
+        # partir de rutas que ya traen el orden a mano y dejar que la búsqueda agregue el resto.
+        routing.CloseModelWithParameters(search)
+        start_routes = _initial_routes(problem, trucks, node_of, n, n_reloads, sequences)
+        initial = routing.ReadAssignmentFromRoutes(
+            [[manager.NodeToIndex(node) for node in route] for route in start_routes], True
+        )
+        if initial is not None:
+            solution = routing.SolveFromAssignmentWithParameters(initial, search)
+    if solution is None:
+        solution = routing.SolveWithParameters(search)
     if solution is None:
         raise RuntimeError("OR-Tools no encontró solución (no debería: todos los pedidos son opcionales)")
 
@@ -199,6 +256,34 @@ def _route(
         routes[truck.vehicle_id] = trips
     dropped = [o for node, o in enumerate(orders, start=1) if node not in served]
     return routes, dropped
+
+
+def _initial_routes(
+    problem: Problem,
+    trucks: list[Vehicle],
+    node_of: dict[str, int],
+    n: int,
+    n_reloads: int,
+    sequences: list[tuple[str, int, list[str]]],
+) -> list[list[int]]:
+    """Nodos por camión con los pedidos bloqueados en (camión, viaje): primero los de orden a
+    mano en ese orden, luego el resto del viaje; una recarga entre viajes consecutivos."""
+    by_trip: dict[tuple[str, int], list[str]] = {(v, t): list(ids) for v, t, ids in sequences}
+    for order_id, (vehicle_id, trip_no) in problem.locks.items():
+        if trip_no is not None and order_id in node_of:
+            ids = by_trip.setdefault((vehicle_id, trip_no), [])
+            if order_id not in ids:
+                ids.append(order_id)
+    routes: list[list[int]] = []
+    for v, truck in enumerate(trucks):
+        last = max((t for (vid, t) in by_trip if vid == truck.vehicle_id), default=0)
+        route: list[int] = []
+        for t in range(1, last + 1):
+            if t > 1:
+                route.append(n + 1 + v * n_reloads + (t - 2))
+            route += [node_of[oid] for oid in by_trip.get((truck.vehicle_id, t), [])]
+        routes.append(route)
+    return routes
 
 
 def _allow_only(routing: pywrapcp.RoutingModel, index: int, vehicle: int) -> None:

@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS locks (
     order_id INTEGER PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
     vehicle_id TEXT NOT NULL,
-    trip_no INTEGER NOT NULL
+    trip_no INTEGER,
+    position INTEGER
 );
 CREATE TABLE IF NOT EXISTS plans (
     plan_date TEXT PRIMARY KEY,
@@ -63,4 +64,23 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate_locks(conn)
     return conn
+
+
+def _migrate_locks(conn: sqlite3.Connection) -> None:
+    """BD anteriores: trip_no era obligatorio y no había posición dentro del viaje."""
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(locks)")}
+    if "position" in columns:
+        return
+    with conn:
+        conn.execute("ALTER TABLE locks RENAME TO locks_old")
+        conn.executescript(
+            "CREATE TABLE locks ("
+            " order_id INTEGER PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,"
+            " vehicle_id TEXT NOT NULL, trip_no INTEGER, position INTEGER);"
+        )
+        conn.execute(
+            "INSERT INTO locks (order_id, vehicle_id, trip_no) SELECT order_id, vehicle_id, trip_no FROM locks_old"
+        )
+        conn.execute("DROP TABLE locks_old")

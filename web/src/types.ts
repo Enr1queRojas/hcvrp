@@ -25,7 +25,8 @@ export type Params = {
   time_limit_s: number;
 };
 
-export type Lock = { vehicle_id: string; trip_no: number };
+/** trip_no null: solo el camión, el plan elige viaje y orden. position: orden fijado a mano. */
+export type Lock = { vehicle_id: string; trip_no: number | null; position: number | null };
 
 export type Order = {
   id: number;

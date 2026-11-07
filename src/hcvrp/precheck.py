@@ -47,10 +47,14 @@ def _check_locks(problem: Problem, merged: list[Order]) -> None:
             raise ValueError(f"lock on order {order_id!r}: unknown vehicle {vehicle_id!r}")
         if not vehicle.available:
             raise ValueError(f"lock on order {order_id!r}: vehicle {vehicle_id!r} is unavailable")
-        if not 1 <= trip_no <= max_trips:
+        if trip_no is not None and not 1 <= trip_no <= max_trips:
             raise ValueError(
                 f"lock on order {order_id!r}: trip_no {trip_no} outside 1..{max_trips}"
             )
+    for order_id in problem.positions:
+        lock = problem.locks.get(order_id)
+        if lock is None or lock[1] is None:
+            raise ValueError(f"position on order {order_id!r} without a (vehicle, trip) lock")
 
 
 def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserved]]:
@@ -86,8 +90,9 @@ def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserv
     for u in unserved:
         if u.order_id in problem.locks:
             vehicle_id, trip_no = problem.locks[u.order_id]
+            where = f"el camión {vehicle_id!r}" + (f", viaje {trip_no}" if trip_no else "")
             raise ValueError(
                 f"bloqueo imposible: el pedido {u.order_id!r} no se puede servir "
-                f"({u.reason.value}) y está bloqueado en el camión {vehicle_id!r}, viaje {trip_no}"
+                f"({u.reason.value}) y está bloqueado en {where}"
             )
     return planeable, unserved

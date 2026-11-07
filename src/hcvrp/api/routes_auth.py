@@ -35,6 +35,7 @@ def login(
         COOKIE_NAME, token,
         max_age=settings.session_days * 86_400,
         httponly=True, samesite="lax", secure=settings.cookie_secure,
+        path=settings.base_path or "/",
     )
     return {"username": body.username}
 
@@ -43,7 +44,10 @@ def login(
 def logout(request: Request, response: Response, conn: sqlite3.Connection = Depends(get_conn)) -> None:
     settings = request.app.state.settings
     auth.logout(conn, request.cookies[COOKIE_NAME])
-    response.delete_cookie(COOKIE_NAME, httponly=True, samesite="lax", secure=settings.cookie_secure)
+    response.delete_cookie(
+        COOKIE_NAME, httponly=True, samesite="lax", secure=settings.cookie_secure,
+        path=settings.base_path or "/",
+    )
 
 
 @router.get("/me")
