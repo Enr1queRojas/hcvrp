@@ -21,7 +21,7 @@ def _client(row: sqlite3.Row) -> Client:
     location = None if row["lat"] is None or row["lon"] is None else Location(row["lat"], row["lon"])
     return Client(
         row["code"], row["name"], row["address"], location, LocationStatus(row["location_status"]),
-        row["opens_at"], row["closes_at"],
+        row["opens_at"], row["closes_at"], tuple(json.loads(row["blocked_vehicles"])), bool(row["puesta"]),
     )
 
 
@@ -38,15 +38,16 @@ def get_client(conn: sqlite3.Connection, code: str) -> Client | None:
 def upsert_client(conn: sqlite3.Connection, client: Client) -> None:
     loc = client.location
     conn.execute(
-        "INSERT INTO clients (code, name, address, lat, lon, location_status, opens_at, closes_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO clients (code, name, address, lat, lon, location_status, opens_at, closes_at, "
+        "blocked_vehicles, puesta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (code) DO UPDATE SET name = excluded.name, address = excluded.address, "
         "lat = excluded.lat, lon = excluded.lon, location_status = excluded.location_status, "
-        "opens_at = excluded.opens_at, closes_at = excluded.closes_at",
+        "opens_at = excluded.opens_at, closes_at = excluded.closes_at, "
+        "blocked_vehicles = excluded.blocked_vehicles, puesta = excluded.puesta",
         (
             client.code, client.name, client.address,
             loc.lat if loc else None, loc.lon if loc else None, client.location_status.value,
-            client.opens_at, client.closes_at,
+            client.opens_at, client.closes_at, json.dumps(list(client.blocked_vehicles)), int(client.puesta),
         ),
     )
     conn.commit()

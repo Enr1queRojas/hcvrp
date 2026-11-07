@@ -47,6 +47,15 @@ def _check_within_hours(client: Client, start: int | None, end: int | None) -> N
         )
 
 
+def _check_truck_fits(conn: sqlite3.Connection, order_id: int, vehicle_id: str) -> None:
+    order = store.get_order(conn, order_id)
+    client = store.get_client(conn, order.client_code) if order else None
+    if client is not None and not client.can_receive(vehicle_id):
+        raise HTTPException(
+            status_code=422, detail=f"el camión {vehicle_id} no puede entrar con {client.name}"
+        )
+
+
 def _day_of(conn: sqlite3.Connection, order_id: int) -> Date:
     day = store.order_day(conn, order_id)
     if day is None:
@@ -91,6 +100,8 @@ def set_sequence(body: SequenceIn, request: Request, conn: sqlite3.Connection = 
     missing = [i for i in ids if i not in day_ids]
     if missing:
         raise HTTPException(status_code=422, detail=f"los pedidos {missing} no son de ese día")
+    for order_id in ids:
+        _check_truck_fits(conn, order_id, body.vehicle_id)
     store.set_sequence(conn, body.vehicle_id, trips)
     request.app.state.on_change(body.date)
 
@@ -161,6 +172,7 @@ def set_lock(
     max_trips = store.get_params(conn).max_trips_per_vehicle
     if body.trip_no is not None and body.trip_no > max_trips:
         raise HTTPException(status_code=422, detail=f"el viaje debe estar entre 1 y {max_trips}")
+    _check_truck_fits(conn, order_id, body.vehicle_id)
     store.set_lock(conn, order_id, body.vehicle_id, body.trip_no)
     request.app.state.on_change(day)
     return body

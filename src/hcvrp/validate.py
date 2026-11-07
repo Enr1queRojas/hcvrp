@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hcvrp.domain import Plan, Problem
+from hcvrp.domain import Plan, Problem, puesta_amounts
 from hcvrp.precheck import merge_orders
 from hcvrp.schedule import service_bounds
 
@@ -19,6 +19,7 @@ def validate(problem: Problem, plan: Plan, matrix) -> list[str]:
     orders = {o.order_id: o for o in merge_orders(problem.orders)}
 
     seen: dict[str, int] = {}
+    served_kg: dict[str, int] = {}
     placement: dict[str, tuple[str, int]] = {}
     cost = km_total = liters = 0.0
     total_trips = used = 0
@@ -109,14 +110,24 @@ def validate(problem: Problem, plan: Plan, matrix) -> list[str]:
                 out.append(f"{tag}: kg {trip.kg} exceden la capacidad de {veh.capacity_kg} kg")
 
             for s in trip.stops:
+                client = problem.clients.get(s.client_code)
+                if client is not None and not client.can_receive(vid):
+                    out.append(f"{tag}: el camión {vid} no puede entrar con el cliente {s.client_code}")
                 seen[s.order_id] = seen.get(s.order_id, 0) + 1
                 placement[s.order_id] = (vid, trip.trip_no)
                 o = orders.get(s.order_id)
                 if o is None:
                     out.append(f"{tag}: pedido {s.order_id} no existe en el problema")
                     continue
+                served_kg[s.order_id] = s.kg
                 if s.kg != o.kg:
-                    out.append(f"{tag}: pedido {s.order_id} entrega {s.kg} kg pero el pedido es de {o.kg} kg")
+                    client = problem.clients.get(o.client_code)
+                    is_puesta = (
+                        client is not None and client.puesta and s.order_id not in problem.locks
+                        and s.kg in puesta_amounts(o.kg)
+                    )
+                    if not is_puesta:
+                        out.append(f"{tag}: pedido {s.order_id} entrega {s.kg} kg pero el pedido es de {o.kg} kg")
                 if s.client_code != o.client_code:
                     out.append(f"{tag}: pedido {s.order_id} atendido en cliente {s.client_code}, corresponde a {o.client_code}")
 
@@ -126,10 +137,21 @@ def validate(problem: Problem, plan: Plan, matrix) -> list[str]:
                 cost += l * params.diesel_mxn_per_liter + trip.kg * params.loading_mxn_per_kg
             km_total += km
 
+    left_kg: dict[str, int] = {}
     for u in plan.unserved:
-        seen[u.order_id] = seen.get(u.order_id, 0) + 1
         if u.order_id not in orders:
             out.append(f"Pedido {u.order_id}: no servido pero no existe en el problema")
+        if u.kg is not None:  # lo que faltó de una puesta: el pedido ya cuenta como servido
+            left_kg[u.order_id] = left_kg.get(u.order_id, 0) + u.kg
+            continue
+        seen[u.order_id] = seen.get(u.order_id, 0) + 1
+
+    for oid, o in orders.items():
+        got, left = served_kg.get(oid), left_kg.get(oid, 0)
+        if got is not None and got + left != o.kg:
+            out.append(f"Pedido {oid}: se entregan {got} kg y faltan {left} kg, pero el pedido es de {o.kg} kg")
+        if got is None and left:
+            out.append(f"Pedido {oid}: tiene kilos pendientes de puesta pero no se entregó nada")
 
     for oid in orders:
         n = seen.get(oid, 0)

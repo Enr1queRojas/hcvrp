@@ -128,9 +128,11 @@ export function PlanView({ date, status, config, onChanged }: Props) {
   const lockOf = (orderId: string) => orders.find((o) => String(o.id) === orderId)?.lock ?? null;
   const trucks = fleet.filter((v) => v.available).map((v) => v.vehicle_id);
 
-  const assignment = (orderId: string, clientName: string) => {
+  const assignment = (orderId: string, clientCode: string, clientName: string) => {
     const lock = lockOf(orderId);
-    const options = lock && !trucks.includes(lock.vehicle_id) ? [...trucks, lock.vehicle_id] : trucks;
+    const blocked = clients.find((c) => c.code === clientCode)?.blocked_vehicles ?? [];
+    const fit = trucks.filter((id) => !blocked.includes(id));
+    const options = lock && !fit.includes(lock.vehicle_id) ? [...fit, lock.vehicle_id] : fit;
     return (
       <div className="assign">
         <select
@@ -201,6 +203,9 @@ export function PlanView({ date, status, config, onChanged }: Props) {
             {plan.summary.late_stops > 0 && (
               <div data-alert="true"><dt>Entregas fuera de horario</dt><dd>{plan.summary.late_stops}</dd></div>
             )}
+            {plan.summary.puesta_stops > 0 && (
+              <div data-signal="true"><dt>Entregas en puesta</dt><dd>{plan.summary.puesta_stops}</dd></div>
+            )}
           </dl>
           <p className="comparison">{comparisonText(plan)}</p>
           {plan.lock_cost_diff_mxn !== null && (
@@ -252,7 +257,7 @@ export function PlanView({ date, status, config, onChanged }: Props) {
                           {u.reason_label}
                           {u.reason === "sin_coordenadas" && <> <a href="#clientes">Fijar ubicación</a></>}
                         </td>
-                        <td>{assignment(u.order_id, u.client_name)}</td>
+                        <td>{assignment(u.order_id, u.client_code, u.client_name)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -357,7 +362,12 @@ export function PlanView({ date, status, config, onChanged }: Props) {
                                       <span className="window-tag">Horario: {windowText(stop.window_start, stop.window_end)}</span>
                                     )}
                                   </td>
-                                  <td className="num">{kg(stop.kg)}</td>
+                                  <td className="num">
+                                    {kg(stop.kg)}
+                                    {stop.kg < stop.ordered_kg && (
+                                      <span className="puesta-tag">puesta, de {kg(stop.ordered_kg)}</span>
+                                    )}
+                                  </td>
                                   <td>
                                     {pending ? "…" : (
                                       <>
@@ -368,7 +378,7 @@ export function PlanView({ date, status, config, onChanged }: Props) {
                                     )}
                                   </td>
                                   <td>{pending ? "…" : hhmm(stop.departure_min)}</td>
-                                  <td>{assignment(stop.order_id, stop.client_name)}</td>
+                                  <td>{assignment(stop.order_id, stop.client_code, stop.client_name)}</td>
                                 </tr>
                               );
                             })}

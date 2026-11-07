@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hcvrp.domain import Location, Order, Problem, Unserved, UnservedReason
+from hcvrp.domain import Location, Order, Problem, Unserved, UnservedReason, puesta_amounts
 from hcvrp.geo.matrix import Matrix
 from hcvrp.schedule import service_bounds
 
@@ -47,6 +47,7 @@ def _check_locks(problem: Problem, merged: list[Order]) -> None:
     for o in problem.orders:
         survivor_by_original[o.order_id] = first_by_client[o.client_code]
     max_trips = problem.params.max_trips_per_vehicle
+    client_of = {o.order_id: o.client_code for o in merged}
     for order_id, (vehicle_id, trip_no) in problem.locks.items():
         if order_id not in surviving:
             if order_id in survivor_by_original:
@@ -58,6 +59,12 @@ def _check_locks(problem: Problem, merged: list[Order]) -> None:
         vehicle = vehicles.get(vehicle_id)
         if vehicle is None:
             raise ValueError(f"lock on order {order_id!r}: unknown vehicle {vehicle_id!r}")
+        client = problem.clients.get(client_of.get(order_id, ""))
+        if client is not None and not client.can_receive(vehicle_id):
+            raise ValueError(
+                f"bloqueo imposible: el camión {vehicle_id!r} no puede entrar con el cliente "
+                f"{client.code!r} y el pedido {order_id!r} está bloqueado en él"
+            )
         if not vehicle.available:
             raise ValueError(f"lock on order {order_id!r}: vehicle {vehicle_id!r} is unavailable")
         if trip_no is not None and not 1 <= trip_no <= max_trips:
@@ -78,16 +85,22 @@ def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserv
             raise ValueError(f"unknown client code {o.client_code!r} in order {o.order_id!r}")
     _check_locks(problem, merged)
 
-    caps = [v.capacity_kg for v in problem.vehicles if v.available]
-    max_cap = max(caps) if caps else None  # sin flota: lo reporta el solver (saturacion)
+    available = [v for v in problem.vehicles if v.available]
     params = problem.params
     planeable: list[Order] = []
     unserved: list[Unserved] = []
     for o in merged:
         client = problem.clients[o.client_code]
+        fits = [v.capacity_kg for v in available if client.can_receive(v.vehicle_id)]
         if client.location is None:
             reason = UnservedReason.SIN_COORDENADAS
-        elif max_cap is not None and o.kg > max_cap:
+        elif available and not fits:
+            reason = UnservedReason.NINGUN_CAMION_ENTRA
+        elif fits and o.kg > max(fits) and not (
+            client.puesta and o.order_id not in problem.locks
+            and any(a <= max(fits) for a in puesta_amounts(o.kg))
+        ):
+            # Con puesta, un pedido más grande que cualquier camión todavía puede llevarse en parte.
             reason = UnservedReason.EXCEDE_CAPACIDAD
         elif (
             (bounds := service_bounds(o, client, params))[1] is not None

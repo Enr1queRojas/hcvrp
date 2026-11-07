@@ -24,6 +24,15 @@ agenda fuera de lo que el cliente recibe);
 descartar un pedido supera cualquier retraso posible, así que nunca se dejan kilos por cumplir
 un horario.
 
+Puesta (`Client.puesta`) es el último recurso antes de mandar un pedido a otro día, en dos
+pasos: primero el plan normal; si quedaron fuera pedidos libres (no bloqueados) de clientes con
+puesta, un segundo paso parte de ese plan y agrega, solo para ellos, nodos alternativos con una
+parte de los kilos (`puesta_amounts`; a lo más uno por pedido). Los kilos que la puesta deja sin
+entregar cuestan DROP_PENALTY_PER_KG cada uno (cargado en los arcos que salen del nodo), así que
+siempre conviene más que no entregar nada. Como el segundo paso arranca de la solución del primero
+y solo acepta mejoras, nunca entrega menos kilos que el plan sin puesta. (Dar alternativas a
+todos los pedidos desde el principio triplicaba los nodos y la búsqueda encontraba planes peores.)
+
 Por construcción los viajes se usan en orden (t usado => t-1 usado) y no hay viajes
 vacíos intermedios (sin recarga justo al salir ni dos recargas seguidas); un viaje final
 vacío (recarga justo antes de cerrar) se descarta al armar el plan.
@@ -35,9 +44,11 @@ con el del solver (holgura de tiempo 0).
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
-from hcvrp.domain import Order, Plan, Problem, Unserved, UnservedReason, Vehicle
+from hcvrp.domain import Order, Plan, Problem, Unserved, UnservedReason, Vehicle, puesta_amounts
 from hcvrp.geo.matrix import DistanceProvider, Matrix
 from hcvrp.precheck import points_for, precheck
 from hcvrp.schedule import DEPOT_KEY, build_vehicle_plan, service_bounds, summarize
@@ -60,9 +71,18 @@ def solve(problem: Problem, provider: DistanceProvider) -> tuple[Plan, Matrix]:
         routes = {}
         unserved = unserved + [Unserved(o.order_id, UnservedReason.SATURACION_FLOTA) for o in planeable]
     else:
-        routes, dropped = _route(problem, matrix, planeable, trucks)
+        routes, dropped, short = _route(problem, matrix, planeable, trucks)
+        puesta_ids = {
+            o.order_id for o in dropped
+            if o.order_id not in problem.locks
+            and (c := problem.clients.get(o.client_code)) is not None and c.puesta
+        }
+        if puesta_ids:  # último recurso: puesta solo para lo que se iba a otro día
+            start = {vid: [[o.order_id for o in t] for t in trips if t] for vid, trips in routes.items()}
+            routes, dropped, short = _route(problem, matrix, planeable, trucks, puesta_ids, start)
         _check_locks_honored(problem, planeable, routes)
-        unserved = unserved + [Unserved(o.order_id, UnservedReason.SATURACION_FLOTA) for o in dropped]
+        unserved = unserved + [Unserved(o.order_id, _drop_reason(problem, o, trucks)) for o in dropped]
+        unserved += [Unserved(oid, UnservedReason.PUESTA_PARCIAL, kg) for oid, kg in short.items()]
 
     vehicle_plans = [
         build_vehicle_plan(vid, trips, matrix, problem.params, problem.clients)
@@ -73,6 +93,15 @@ def solve(problem: Problem, provider: DistanceProvider) -> tuple[Plan, Matrix]:
     if violations:
         raise AssertionError("plan inválido:\n" + "\n".join(violations))
     return plan, matrix
+
+
+def _drop_reason(problem: Problem, order: Order, trucks: list[Vehicle]) -> UnservedReason:
+    """Un pedido con puesta más grande que cualquier camión llega aquí si ni su parte cupo."""
+    client = problem.clients.get(order.client_code)
+    fits = [t.capacity_kg for t in trucks if client is None or client.can_receive(t.vehicle_id)]
+    if fits and order.kg > max(fits):
+        return UnservedReason.EXCEDE_CAPACIDAD
+    return UnservedReason.SATURACION_FLOTA
 
 
 def _check_locks_honored(
@@ -115,12 +144,32 @@ def _sequences(problem: Problem, order_ids: set[str]) -> list[tuple[str, int, li
 
 
 def _route(
-    problem: Problem, matrix: Matrix, orders: list[Order], trucks: list[Vehicle]
-) -> tuple[dict[str, list[list[Order]]], list[Order]]:
+    problem: Problem,
+    matrix: Matrix,
+    orders: list[Order],
+    trucks: list[Vehicle],
+    puesta_ids: set[str] = frozenset(),
+    start: dict[str, list[list[str]]] | None = None,
+) -> tuple[dict[str, list[list[Order]]], list[Order], dict[str, int]]:
+    """Rutas por camión, pedidos sin entregar y {pedido: kg que faltaron} de las puestas.
+
+    `puesta_ids`: pedidos que pueden llevarse en puesta. `start`: rutas de partida
+    ({camión: [[pedidos del viaje]]}), p. ej. el plan del primer paso.
+    """
     params = problem.params
     n_reloads = params.max_trips_per_vehicle - 1
+    full = orders
+    # Nodos alternativos de puesta (mismo pedido, menos kilos), después de los pedidos completos.
+    partial: list[Order] = []
+    for o in full:
+        if o.order_id in puesta_ids:
+            partial += [replace(o, kg=kg) for kg in puesta_amounts(o.kg)]
+    orders = full + partial
+    original_kg = {o.order_id: o.kg for o in full}
+    shortfall = [0] + [original_kg[o.order_id] - o.kg for o in orders]
     n = len(orders)
-    # Nodos: 0 = bodega; 1..n = pedidos; luego n_reloads recargas por camión.
+    # Nodos: 0 = bodega; 1..len(full) = pedidos completos; luego sus alternativas de puesta;
+    # luego n_reloads recargas por camión.
     reload_owner: dict[int, int] = {
         n + 1 + v * n_reloads + r: v for v in range(len(trucks)) for r in range(n_reloads)
     }
@@ -146,6 +195,9 @@ def _route(
                 for ia, a in enumerate(keys)
             ]
             max_arc = max(max_arc, max(max(row) for row in table))
+            for ia in range(1, n + 1):  # kilos que la puesta deja sin entregar
+                if shortfall[ia]:
+                    table[ia] = [c + shortfall[ia] * DROP_PENALTY_PER_KG for c in table[ia]]
             cost_cb[kmpl] = routing.RegisterTransitCallback(
                 lambda i, j, table=table: table[manager.IndexToNode(i)][manager.IndexToNode(j)]
             )
@@ -227,14 +279,25 @@ def _route(
     ) + LATE_PENALTY_PER_MIN * params.shift_minutes * len(windowed)
     # Un pedido bloqueado cuesta más descartarlo que todos los libres juntos: la búsqueda nunca
     # cambia uno bloqueado por otros más pesados (y si queda fuera, el bloqueo era imposible).
-    penalty = [o.kg * DROP_PENALTY_PER_KG + route_cost_bound for o in orders]
+    penalty = [o.kg * DROP_PENALTY_PER_KG + route_cost_bound for o in full]
     locked_extra = sum(penalty)
+    alternatives: dict[str, list[int]] = {}
     for node, o in enumerate(orders, start=1):
+        alternatives.setdefault(o.order_id, []).append(manager.NodeToIndex(node))
+    for node, o in enumerate(full, start=1):
         extra = locked_extra if o.order_id in problem.locks else 0
-        routing.AddDisjunction([manager.NodeToIndex(node)], penalty[node - 1] + extra)
+        # El pedido completo o una de sus puestas (a lo más uno); ninguno cuesta todo el pedido.
+        routing.AddDisjunction(alternatives[o.order_id], penalty[node - 1] + extra, 1)
+
+    # Camiones que no pueden entrar con el cliente (por dimensiones).
+    for node, o in enumerate(orders, start=1):
+        client = problem.clients.get(o.client_code)
+        if client is not None and client.blocked_vehicles:
+            allowed = [v for v, t in enumerate(trucks) if client.can_receive(t.vehicle_id)]
+            routing.VehicleVar(manager.NodeToIndex(node)).SetValues([-1] + allowed)
 
     # Bloqueos (camión, viaje).
-    node_of = {o.order_id: node for node, o in enumerate(orders, start=1)}
+    node_of = {o.order_id: node for node, o in enumerate(full, start=1)}
     vehicle_of = {t.vehicle_id: v for v, t in enumerate(trucks)}
     for order_id, (vehicle_id, trip_no) in problem.locks.items():
         if order_id in node_of:
@@ -260,11 +323,22 @@ def _route(
     search.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     search.time_limit.seconds = params.time_limit_s
     solution = None
-    if sequences:
+    if sequences or start:
         # La primera solución voraz no ve las restricciones de orden y descarta esos pedidos;
-        # partir de rutas que ya traen el orden a mano y dejar que la búsqueda agregue el resto.
+        # partir de rutas que ya traen el orden a mano (o del plan del primer paso) y dejar que
+        # la búsqueda agregue el resto.
         routing.CloseModelWithParameters(search)
-        start_routes = _initial_routes(problem, trucks, node_of, n, n_reloads, sequences)
+        if start:
+            start_routes = [
+                [
+                    node
+                    for t, trip in enumerate(start.get(truck.vehicle_id, []))
+                    for node in ([n + 1 + v * n_reloads + t - 1] if t else []) + [node_of[oid] for oid in trip]
+                ]
+                for v, truck in enumerate(trucks)
+            ]
+        else:
+            start_routes = _initial_routes(problem, trucks, node_of, n, n_reloads, sequences)
         initial = routing.ReadAssignmentFromRoutes(
             [[manager.NodeToIndex(node) for node in route] for route in start_routes], True
         )
@@ -276,7 +350,8 @@ def _route(
         raise RuntimeError("OR-Tools no encontró solución (no debería: todos los pedidos son opcionales)")
 
     routes: dict[str, list[list[Order]]] = {}
-    served: set[int] = set()
+    served: set[str] = set()
+    short: dict[str, int] = {}
     for v, truck in enumerate(trucks):
         trips: list[list[Order]] = [[]]
         idx = solution.Value(routing.NextVar(routing.Start(v)))
@@ -285,12 +360,15 @@ def _route(
             if node in reload_owner:
                 trips.append([])
             else:
-                trips[-1].append(orders[node - 1])
-                served.add(node)
+                o = orders[node - 1]
+                trips[-1].append(o)
+                served.add(o.order_id)
+                if shortfall[node]:
+                    short[o.order_id] = shortfall[node]
             idx = solution.Value(routing.NextVar(idx))
         routes[truck.vehicle_id] = trips
-    dropped = [o for node, o in enumerate(orders, start=1) if node not in served]
-    return routes, dropped
+    dropped = [o for o in full if o.order_id not in served]
+    return routes, dropped, short
 
 
 def _initial_routes(

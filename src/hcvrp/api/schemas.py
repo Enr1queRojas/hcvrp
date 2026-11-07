@@ -12,6 +12,7 @@ from pydantic import (
 
 from hcvrp.baseline import Comparison, served_kg
 from hcvrp.cli import REASONS_ES
+from hcvrp.precheck import merge_orders
 from hcvrp.domain import (
     Client, Location, LocationStatus, Plan, Problem, Trip, clock_to_minutes, minutes_to_clock,
 )
@@ -39,6 +40,8 @@ class ClientOut(BaseModel):
     location_status: str
     opens_at: str  # "HH:MM": el cliente recibe a partir de esta hora
     closes_at: str  # "HH:MM": la entrega debe terminar antes de esta hora
+    blocked_vehicles: list[str]  # camiones que no pueden entrar con este cliente
+    puesta: bool  # en urgencia acepta solo 10-15% de su pedido; el resto pasa a otro día
 
     @classmethod
     def of(cls, client: Client) -> ClientOut:
@@ -48,6 +51,7 @@ class ClientOut(BaseModel):
             lat=loc.lat if loc else None, lon=loc.lon if loc else None,
             location_status=client.location_status.value,
             opens_at=minutes_to_clock(client.opens_at), closes_at=minutes_to_clock(client.closes_at),
+            blocked_vehicles=list(client.blocked_vehicles), puesta=client.puesta,
         )
 
 
@@ -66,6 +70,8 @@ class ClientIn(_Hours):
     address: str = ""
     opens_at: Clock = "09:00"
     closes_at: Clock = "18:00"
+    blocked_vehicles: list[str] = []
+    puesta: bool = False
 
 
 class ClientPatch(_Hours):
@@ -73,6 +79,8 @@ class ClientPatch(_Hours):
     address: str | None = None
     opens_at: Clock | None = None
     closes_at: Clock | None = None
+    blocked_vehicles: list[str] | None = None
+    puesta: bool | None = None
 
 
 class LocationIn(BaseModel):
@@ -187,6 +195,7 @@ class PlanSummary(BaseModel):
     served_kg: int
     unserved_kg: int
     late_stops: int = 0  # paradas que no se alcanzaron a entregar dentro de su horario
+    puesta_stops: int = 0  # paradas que llevan solo una parte del pedido (puesta)
 
 
 class AfternoonLoad(BaseModel):
@@ -203,6 +212,7 @@ class StopOut(BaseModel):
     kg: int
     arrival_min: int
     departure_min: int
+    ordered_kg: int = 0  # kilos del pedido; mayor que kg cuando se entrega en puesta
     wait_min: int = 0
     window_start: int | None = None
     window_end: int | None = None
@@ -293,7 +303,7 @@ def plan_out(
 ) -> PlanOut:
     capacities = {v.vehicle_id: v.capacity_kg for v in problem.vehicles}
     names = {code: c.name for code, c in problem.clients.items()}
-    orders = {o.order_id: o for o in problem.orders}
+    orders = {o.order_id: o for o in merge_orders(problem.orders)}
 
     vehicles = []
     for vp in plan.vehicles:
@@ -311,7 +321,7 @@ def plan_out(
                             order_id=s.order_id, client_code=s.client_code,
                             client_name=names[s.client_code], kg=s.kg,
                             arrival_min=s.arrival_min, departure_min=s.departure_min,
-                            wait_min=s.wait_min, window_start=s.window_start,
+                            ordered_kg=orders[s.order_id].kg, wait_min=s.wait_min, window_start=s.window_start,
                             window_end=s.window_end, late_min=s.late_min,
                         )
                         for s in t.stops
@@ -326,7 +336,7 @@ def plan_out(
         order = orders[u.order_id]
         unserved.append(UnservedOut(
             order_id=u.order_id, client_code=order.client_code,
-            client_name=names[order.client_code], kg=order.kg,
+            client_name=names[order.client_code], kg=order.kg if u.kg is None else u.kg,
             reason=u.reason.value, reason_label=REASONS_ES[u.reason.value],
         ))
 
@@ -340,6 +350,9 @@ def plan_out(
             reloads=plan.reloads, vehicles_used=len(plan.vehicles), served_kg=served_kg(plan),
             unserved_kg=sum(u.kg for u in unserved),
             late_stops=sum(s.late_min > 0 for vp in plan.vehicles for t in vp.trips for s in t.stops),
+            puesta_stops=sum(
+                s.kg < orders[s.order_id].kg for vp in plan.vehicles for t in vp.trips for s in t.stops
+            ),
         ),
         uses_unverified_locations=bool(unverified),
         unverified_clients=unverified,

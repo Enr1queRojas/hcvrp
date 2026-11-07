@@ -202,3 +202,13 @@ def test_order_window_must_fit_client_hours(client):
         assert r.status_code == 422 and "recibe de 10:00 a 14:00" in r.json()["detail"], window
     r = client.post("/api/orders", json={"date": D, "client_code": "BETO", "kg": 100, "window_end": 600})
     assert r.status_code == 422  # 19:00, después de que cierra a las 18:00
+
+
+def test_cannot_lock_on_truck_that_does_not_fit(client):
+    client.patch("/api/clients/AARON", json={"blocked_vehicles": ["V2"]})
+    o = add(client).json()
+    r = client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2"})
+    assert r.status_code == 422 and "no puede entrar" in r.json()["detail"]
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V2", "trips": [[o["id"]]]})
+    assert r.status_code == 422 and "no puede entrar" in r.json()["detail"]
+    assert client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V1"}).status_code == 200

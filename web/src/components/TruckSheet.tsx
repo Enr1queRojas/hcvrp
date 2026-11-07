@@ -46,7 +46,10 @@ export function TruckSheet({ date, vehicle, clients, onDone }: Props) {
                   <td>{i + 1}</td>
                   <td>{stop.client_code} {stop.client_name}</td>
                   <td>{address(stop.client_code)}</td>
-                  <td className="num">{kg(stop.kg)}</td>
+                  <td className="num">
+                    {kg(stop.kg)}
+                    {stop.kg < stop.ordered_kg && <strong> (puesta, de {kg(stop.ordered_kg)})</strong>}
+                  </td>
                   <td>{windowText(stop.window_start, stop.window_end)}</td>
                   <td>
                     {hhmm(stop.arrival_min)}

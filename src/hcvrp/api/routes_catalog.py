@@ -21,6 +21,12 @@ def _existing(conn: sqlite3.Connection, code: str) -> Client:
     return client
 
 
+def _check_trucks(conn: sqlite3.Connection, vehicle_ids: list[str] | None) -> None:
+    unknown = sorted(set(vehicle_ids or ()) - {v.vehicle_id for v in store.get_fleet(conn)})
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"no existen los camiones: {', '.join(unknown)}")
+
+
 @router.get("/clients")
 def list_clients(conn: sqlite3.Connection = Depends(get_conn)) -> list[ClientOut]:
     return [ClientOut.of(c) for c in store.list_clients(conn).values()]
@@ -32,9 +38,10 @@ def create_client(
 ) -> ClientOut:
     if store.get_client(conn, body.code) is not None:
         raise HTTPException(status_code=409, detail=f"ya existe el cliente {body.code}")
+    _check_trucks(conn, body.blocked_vehicles)
     client = Client(
         body.code, body.name, body.address, None, LocationStatus.PENDIENTE,
-        clock_to_minutes(body.opens_at), clock_to_minutes(body.closes_at),
+        clock_to_minutes(body.opens_at), clock_to_minutes(body.closes_at), tuple(body.blocked_vehicles),
     )
     store.upsert_client(conn, client)
     request.app.state.on_change(None)
@@ -49,6 +56,9 @@ def patch_client(
     for field in ("opens_at", "closes_at"):
         if field in changes:
             changes[field] = clock_to_minutes(changes[field])
+    if "blocked_vehicles" in changes:
+        _check_trucks(conn, changes["blocked_vehicles"])
+        changes["blocked_vehicles"] = tuple(changes["blocked_vehicles"])
     try:
         client = replace(_existing(conn, code), **changes)
     except ValueError:

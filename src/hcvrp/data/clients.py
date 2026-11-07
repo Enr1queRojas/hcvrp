@@ -61,6 +61,8 @@ def save_clients(clients: list[Client], path: Path) -> None:
             "location_status": c.location_status.value,
             "opens_at": minutes_to_clock(c.opens_at),
             "closes_at": minutes_to_clock(c.closes_at),
+            "blocked_vehicles": list(c.blocked_vehicles),
+            "puesta": c.puesta,
         }
         for c in clients
     ]
@@ -80,6 +82,8 @@ def load_clients(path: Path) -> dict[str, Client]:
             location=loc, location_status=LocationStatus(d["location_status"]),
             opens_at=clock_to_minutes(d.get("opens_at") or minutes_to_clock(DEFAULT_OPENS_AT)),
             closes_at=clock_to_minutes(d.get("closes_at") or minutes_to_clock(DEFAULT_CLOSES_AT)),
+            blocked_vehicles=tuple(d.get("blocked_vehicles") or ()),
+            puesta=bool(d.get("puesta", False)),
         )
     return out
 

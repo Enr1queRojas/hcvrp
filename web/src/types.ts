@@ -8,6 +8,10 @@ export type Client = {
   /** "HH:MM": el cliente recibe en este horario; nunca se le entrega fuera. */
   opens_at: string;
   closes_at: string;
+  /** Camiones que no pueden entrar con este cliente (por sus dimensiones). */
+  blocked_vehicles: string[];
+  /** En urgencia acepta solo 10-15% de su pedido; el resto pasa a otro día. */
+  puesta: boolean;
 };
 
 export type Vehicle = {
@@ -50,6 +54,8 @@ export type Stop = {
   kg: number;
   arrival_min: number;
   departure_min: number;
+  /** Kilos del pedido; mayor que kg cuando la parada lleva solo una puesta. */
+  ordered_kg: number;
   wait_min: number;
   window_start: number | null;
   window_end: number | null;
@@ -89,6 +95,7 @@ export type Plan = {
     served_kg: number;
     unserved_kg: number;
   late_stops: number;
+  puesta_stops: number;
   };
   uses_unverified_locations: boolean;
   unverified_clients: string[];

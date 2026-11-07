@@ -21,6 +21,17 @@ DEFAULT_OPENS_AT = 9 * 60  # horario de recepción de los clientes, en minutos d
 DEFAULT_CLOSES_AT = 18 * 60
 
 
+# Puesta: en urgencia, a un cliente con puesta se le puede llevar solo esta parte de su pedido
+# (el resto pasa a otro día). El motor prueba primero la más grande.
+PUESTA_SHARES = (0.15, 0.10)
+
+
+def puesta_amounts(kg: int) -> tuple[int, ...]:
+    """Kilos que se le pueden llevar en puesta a un pedido de `kg`, de mayor a menor."""
+    amounts = {round(kg * share) for share in PUESTA_SHARES}
+    return tuple(sorted((a for a in amounts if 0 < a < kg), reverse=True))
+
+
 def clock_to_minutes(value: str) -> int:
     """De "HH:MM" a minutos desde la medianoche."""
     hours, minutes = value.split(":")
@@ -42,8 +53,16 @@ class Client:
     # debe empezar después de abrir y terminar antes de cerrar.
     opens_at: int = DEFAULT_OPENS_AT
     closes_at: int = DEFAULT_CLOSES_AT
+    # Camiones que no pueden entrar con este cliente (por sus dimensiones). Tupla ordenada.
+    blocked_vehicles: tuple[str, ...] = ()
+    # Puesta: en urgencia acepta solo una parte de su pedido (PUESTA_SHARES); el resto pasa a otro día.
+    puesta: bool = False
+
+    def can_receive(self, vehicle_id: str) -> bool:
+        return vehicle_id not in self.blocked_vehicles
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "blocked_vehicles", tuple(sorted(set(self.blocked_vehicles))))
         if not 0 <= self.opens_at < self.closes_at <= 24 * 60:
             raise ValueError(
                 f"horario inválido para el cliente {self.code!r}: abre {self.opens_at}, cierra {self.closes_at}"
@@ -118,6 +137,8 @@ class UnservedReason(StrEnum):
     EXCEDE_CAPACIDAD = "excede_capacidad"
     NO_CABE_JORNADA = "no_cabe_jornada"
     FUERA_HORARIO_CLIENTE = "fuera_horario_cliente"
+    NINGUN_CAMION_ENTRA = "ningun_camion_entra"
+    PUESTA_PARCIAL = "puesta_parcial"
     SIN_COORDENADAS = "sin_coordenadas"
     SATURACION_FLOTA = "saturacion_flota"
 
@@ -162,6 +183,7 @@ class VehiclePlan:
 class Unserved:
     order_id: str
     reason: UnservedReason
+    kg: int | None = None  # None: el pedido completo; un número: lo que faltó tras una puesta
 
 
 @dataclass(frozen=True)

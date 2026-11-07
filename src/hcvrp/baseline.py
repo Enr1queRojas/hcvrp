@@ -31,6 +31,9 @@ def baseline_plan(problem: Problem, provider: DistanceProvider) -> tuple[Plan, M
                 for o in pending:
                     if load + o.kg > truck.capacity_kg:
                         continue
+                    client = problem.clients.get(o.client_code)
+                    if client is not None and not client.can_receive(truck.vehicle_id):
+                        continue
                     go = matrix.minutes(pos, o.client_code)
                     back = matrix.minutes(o.client_code, DEPOT_KEY)
                     earliest, latest = service_bounds(o, problem.clients.get(o.client_code), params)

@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS clients (
     lon REAL,
     location_status TEXT NOT NULL,
     opens_at INTEGER NOT NULL DEFAULT 540,
-    closes_at INTEGER NOT NULL DEFAULT 1080
+    closes_at INTEGER NOT NULL DEFAULT 1080,
+    blocked_vehicles TEXT NOT NULL DEFAULT '[]',
+    puesta INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS vehicles (
     vehicle_id TEXT PRIMARY KEY,
@@ -82,6 +84,10 @@ def _migrate_client_hours(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE clients ADD COLUMN opens_at INTEGER NOT NULL DEFAULT 540")
         if "closes_at" not in columns:
             conn.execute("ALTER TABLE clients ADD COLUMN closes_at INTEGER NOT NULL DEFAULT 1080")
+        if "blocked_vehicles" not in columns:  # camiones que no pueden entrar (lista JSON)
+            conn.execute("ALTER TABLE clients ADD COLUMN blocked_vehicles TEXT NOT NULL DEFAULT '[]'")
+        if "puesta" not in columns:
+            conn.execute("ALTER TABLE clients ADD COLUMN puesta INTEGER NOT NULL DEFAULT 0")
 
 
 def _migrate_order_windows(conn: sqlite3.Connection) -> None:

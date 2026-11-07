@@ -112,3 +112,20 @@ def test_client_hours_can_change(client):
 def test_new_client_hours(client):
     r = client.post("/api/clients", json={"code": "NUEVO", "name": "Nuevo", "opens_at": "08:00", "closes_at": "13:00"})
     assert r.status_code == 201 and (r.json()["opens_at"], r.json()["closes_at"]) == ("08:00", "13:00")
+
+
+def test_blocked_trucks_on_client(client):
+    assert client.get("/api/clients").json()[0]["blocked_vehicles"] == []
+    r = client.patch("/api/clients/AARON", json={"blocked_vehicles": ["V3", "V1"]})
+    assert r.status_code == 200 and r.json()["blocked_vehicles"] == ["V1", "V3"]
+    r = client.patch("/api/clients/AARON", json={"blocked_vehicles": ["NOEXISTE"]})
+    assert r.status_code == 422 and "NOEXISTE" in r.json()["detail"]
+    r = client.patch("/api/clients/AARON", json={"name": "Aaron 2"})  # otros cambios no la borran
+    assert r.json()["blocked_vehicles"] == ["V1", "V3"]
+
+
+def test_client_puesta_flag(client):
+    assert client.get("/api/clients").json()[0]["puesta"] is False
+    r = client.patch("/api/clients/AARON", json={"puesta": True})
+    assert r.status_code == 200 and r.json()["puesta"] is True
+    assert client.patch("/api/clients/AARON", json={"name": "Otro"}).json()["puesta"] is True

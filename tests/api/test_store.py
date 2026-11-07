@@ -197,3 +197,14 @@ def test_old_clients_table_gets_default_hours(tmp_path):
     old.commit(); old.close()
     c = list_clients(connect(path))["AARON"]
     assert (c.opens_at, c.closes_at) == (9 * 60, 18 * 60)
+
+
+def test_blocked_trucks_persist(conn):
+    c = Client("X", "X", "", None, LocationStatus.PENDIENTE, blocked_vehicles=("Volvo", "Leña"))
+    upsert_client(conn, c)
+    assert get_client(conn, "X").blocked_vehicles == ("Leña", "Volvo")
+
+
+def test_puesta_persists(conn):
+    upsert_client(conn, Client("X", "X", "", None, LocationStatus.PENDIENTE, puesta=True))
+    assert get_client(conn, "X").puesta is True

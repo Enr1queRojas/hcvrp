@@ -2,7 +2,7 @@ import maplibregl, { Map as MapLibre, Marker } from "maplibre-gl";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, messageOf } from "../api";
 import { createMap } from "../components/RouteMap";
-import type { Client, Config } from "../types";
+import type { Client, Config, Vehicle } from "../types";
 
 const STATUS_LABEL: Record<Client["location_status"], string> = {
   sintetica: "Sintética",
@@ -19,7 +19,10 @@ export function Clients({ config, onChanged }: Props) {
   const [onlyUnverified, setOnlyUnverified] = useState(false);
   const blankDraft = { code: "", name: "", address: "", opens_at: "09:00", closes_at: "18:00" };
   const [draft, setDraft] = useState(blankDraft);
-  const [edit, setEdit] = useState({ name: "", address: "", opens_at: "09:00", closes_at: "18:00" });
+  const [edit, setEdit] = useState({
+    name: "", address: "", opens_at: "09:00", closes_at: "18:00", blocked_vehicles: [] as string[], puesta: false,
+  });
+  const [fleet, setFleet] = useState<Vehicle[]>([]);
   const [error, setError] = useState("");
   const [map, setMap] = useState<MapLibre | null>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -35,9 +38,12 @@ export function Clients({ config, onChanged }: Props) {
 
   useEffect(() => {
     if (current) {
-      setEdit({ name: current.name, address: current.address, opens_at: current.opens_at, closes_at: current.closes_at });
+      setEdit({
+        name: current.name, address: current.address, opens_at: current.opens_at, closes_at: current.closes_at,
+        blocked_vehicles: current.blocked_vehicles, puesta: current.puesta,
+      });
     }
-  }, [current?.code, current?.name, current?.address, current?.opens_at, current?.closes_at]);
+  }, [current?.code, current?.name, current?.address, current?.opens_at, current?.closes_at, current?.blocked_vehicles.join("|"), current?.puesta]);
 
   const run = useCallback(async (action: () => Promise<unknown>) => {
     setError("");
@@ -59,6 +65,7 @@ export function Clients({ config, onChanged }: Props) {
 
   useEffect(() => {
     load().catch((e) => setError(messageOf(e)));
+    api<Vehicle[]>("/api/fleet").then(setFleet).catch((e) => setError(messageOf(e)));
   }, [load]);
 
   useEffect(() => {
@@ -212,6 +219,35 @@ export function Clients({ config, onChanged }: Props) {
               <span aria-hidden="true">a</span>
               <input type="time" value={edit.closes_at} onChange={(e) => setEdit({ ...edit, closes_at: e.target.value })} required aria-label={`${current.code} recibe hasta`} />
             </fieldset>
+            <fieldset className="truck-checks">
+              <legend>Camiones que no pueden entrar <span className="muted">(por sus dimensiones)</span></legend>
+              {fleet.map((v) => (
+                <label key={v.vehicle_id} className="check">
+                  <input
+                    type="checkbox"
+                    checked={edit.blocked_vehicles.includes(v.vehicle_id)}
+                    onChange={(e) =>
+                      setEdit({
+                        ...edit,
+                        blocked_vehicles: e.target.checked
+                          ? [...edit.blocked_vehicles, v.vehicle_id]
+                          : edit.blocked_vehicles.filter((id) => id !== v.vehicle_id),
+                      })
+                    }
+                  />
+                  {v.vehicle_id} <span className="muted">({(v.capacity_kg / 1000).toLocaleString("es-MX")} t)</span>
+                </label>
+              ))}
+              {fleet.length > 0 && edit.blocked_vehicles.length === fleet.length && (
+                <p className="error">Ningún camión podría entrar: sus pedidos pasarían a otro día.</p>
+              )}
+            </fieldset>
+            <label className="check">
+              <input type="checkbox" checked={edit.puesta} onChange={(e) => setEdit({ ...edit, puesta: e.target.checked })} />
+              <span>
+                Puesta <span className="muted">(en urgencia acepta solo 10–15% de su pedido; el resto pasa a otro día)</span>
+              </span>
+            </label>
             <div className="actions">
               <button type="submit">Guardar cambios</button>
               <button type="button" className="link danger" onClick={remove}>Borrar cliente</button>
