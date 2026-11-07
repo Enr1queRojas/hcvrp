@@ -9,3 +9,6 @@ data/hcvrp.db
 web/node_modules/
 web/dist/
 .env
+
+# Archivos de bloqueo de Office
+~$*

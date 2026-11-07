@@ -80,3 +80,25 @@ export function lockText(lock: { vehicle_id: string; trip_no: number | null; pos
   const base = `Fijado en ${lock.vehicle_id}, viaje ${lock.trip_no}`;
   return lock.position === null ? base : `${base}, parada ${lock.position}`;
 }
+
+const SHIFT_START = 9 * 60;
+
+/** "HH:MM" del reloj a minutos desde las 09:00. Vacío: null. Antes de las 09:00: NaN. */
+export function clockToMinute(value: string): number | null {
+  if (!value) return null;
+  const [h, m] = value.split(":").map(Number);
+  const minute = h * 60 + m - SHIFT_START;
+  return minute < 0 || Number.isNaN(minute) ? NaN : minute;
+}
+
+/** Minutos desde las 09:00 a "HH:MM" para un <input type="time">; null: "". */
+export function minuteToClock(minute: number | null): string {
+  return minute === null ? "" : hhmm(minute);
+}
+
+export function windowText(start: number | null, end: number | null): string {
+  if (start !== null && end !== null) return `${hhmm(start)} a ${hhmm(end)}`;
+  if (end !== null) return `antes de las ${hhmm(end)}`;
+  if (start !== null) return `desde las ${hhmm(start)}`;
+  return "";
+}

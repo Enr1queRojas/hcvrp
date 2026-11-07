@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import logo from "../assets/logo-graneros-guerra.png";
-import { hhmm, kg, km } from "../format";
+import { hhmm, kg, km, windowText } from "../format";
 import type { Client, VehiclePlan } from "../types";
 
 type Props = { date: string; vehicle: VehiclePlan; clients: Client[]; onDone: () => void };
@@ -35,6 +35,7 @@ export function TruckSheet({ date, vehicle, clients, onDone }: Props) {
                 <th>Cliente</th>
                 <th>Dirección</th>
                 <th className="num">Kilos</th>
+                <th>Horario</th>
                 <th>Llega</th>
                 <th>Sale</th>
               </tr>
@@ -45,8 +46,15 @@ export function TruckSheet({ date, vehicle, clients, onDone }: Props) {
                   <td>{i + 1}</td>
                   <td>{stop.client_code} {stop.client_name}</td>
                   <td>{address(stop.client_code)}</td>
-                  <td className="num">{kg(stop.kg)}</td>
-                  <td>{hhmm(stop.arrival_min)}</td>
+                  <td className="num">
+                    {kg(stop.kg)}
+                    {stop.kg < stop.ordered_kg && <strong> (puesta, de {kg(stop.ordered_kg)})</strong>}
+                  </td>
+                  <td>{windowText(stop.window_start, stop.window_end)}</td>
+                  <td>
+                    {hhmm(stop.arrival_min)}
+                    {stop.late_min > 0 && <strong> ({stop.late_min} min tarde)</strong>}
+                  </td>
                   <td>{hhmm(stop.departure_min)}</td>
                 </tr>
               ))}

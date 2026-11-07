@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError, apiUrl, setOnUnauthorized } from "./api";
-import { hhmm, kg, lockText, mxn, tomorrowISO, tripColor, truckColors } from "./format";
+import { clockToMinute, hhmm, kg, lockText, minuteToClock, mxn, tomorrowISO, tripColor, truckColors, windowText } from "./format";
 import { moveStop, shiftStop } from "./sequence";
 import { segments, tripLabel } from "./timeline";
 
@@ -27,6 +27,23 @@ describe("orden de paradas", () => {
   it("describe el bloqueo", () => {
     expect(lockText({ vehicle_id: "Leña", trip_no: null, position: null })).toBe("Fijado en Leña");
     expect(lockText({ vehicle_id: "Leña", trip_no: 2, position: 3 })).toBe("Fijado en Leña, viaje 2, parada 3");
+  });
+});
+
+describe("horarios de entrega", () => {
+  it("convierte la hora del reloj a minutos desde las 09:00 y de regreso", () => {
+    expect(clockToMinute("10:30")).toBe(90);
+    expect(clockToMinute("09:00")).toBe(0);
+    expect(clockToMinute("")).toBeNull();
+    expect(clockToMinute("08:59")).toBeNaN();
+    expect(minuteToClock(90)).toBe("10:30");
+    expect(minuteToClock(null)).toBe("");
+  });
+  it("describe el horario", () => {
+    expect(windowText(60, 180)).toBe("10:00 a 12:00");
+    expect(windowText(null, 120)).toBe("antes de las 11:00");
+    expect(windowText(240, null)).toBe("desde las 13:00");
+    expect(windowText(null, null)).toBe("");
   });
 });
 

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from hcvrp.api import store
 from hcvrp.api.auth import current_user, get_conn
 from hcvrp.api.schemas import LockIO, LockOut, OrderIn, OrderOut, OrderPatch, ScenarioIn, SequenceIn
-from hcvrp.domain import Order
+from hcvrp.domain import SHIFT_START_MIN, Client, Order, minutes_to_clock
 from hcvrp.scenarios import SCENARIOS, generate_scenario
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
@@ -25,11 +25,35 @@ def _orders_out(conn: sqlite3.Connection, day: Date, orders: list[Order]) -> lis
         out.append(OrderOut(
             id=int(o.order_id), date=day, client_code=o.client_code,
             client_name=clients[o.client_code].name, kg=o.kg,
+            window_start=o.window_start, window_end=o.window_end,
             lock=None if lock is None else LockOut(
                 vehicle_id=lock[0], trip_no=lock[1], position=positions.get(o.order_id)
             ),
         ))
     return out
+
+
+def _check_within_hours(client: Client, start: int | None, end: int | None) -> None:
+    """Un horario de pedido no puede salirse del horario en que el cliente recibe."""
+    opens = client.opens_at - SHIFT_START_MIN
+    closes = client.closes_at - SHIFT_START_MIN
+    if (start is not None and not opens <= start < closes) or (end is not None and not opens < end <= closes):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{client.name} recibe de {minutes_to_clock(client.opens_at)} a "
+                f"{minutes_to_clock(client.closes_at)}; el horario de entrega debe quedar dentro"
+            ),
+        )
+
+
+def _check_truck_fits(conn: sqlite3.Connection, order_id: int, vehicle_id: str) -> None:
+    order = store.get_order(conn, order_id)
+    client = store.get_client(conn, order.client_code) if order else None
+    if client is not None and not client.can_receive(vehicle_id):
+        raise HTTPException(
+            status_code=422, detail=f"el camión {vehicle_id} no puede entrar con {client.name}"
+        )
 
 
 def _day_of(conn: sqlite3.Connection, order_id: int) -> Date:
@@ -46,9 +70,11 @@ def list_orders(date: Date, conn: sqlite3.Connection = Depends(get_conn)) -> lis
 
 @router.post("/orders", status_code=201)
 def add_order(body: OrderIn, request: Request, conn: sqlite3.Connection = Depends(get_conn)) -> OrderOut:
-    if store.get_client(conn, body.client_code) is None:
+    client = store.get_client(conn, body.client_code)
+    if client is None:
         raise HTTPException(status_code=404, detail=f"no existe el cliente {body.client_code}")
-    order = store.add_order(conn, body.date, body.client_code, body.kg)
+    _check_within_hours(client, body.window_start, body.window_end)
+    order = store.add_order(conn, body.date, body.client_code, body.kg, body.window_start, body.window_end)
     request.app.state.on_change(body.date)
     return _orders_out(conn, body.date, [order])[0]
 
@@ -74,6 +100,8 @@ def set_sequence(body: SequenceIn, request: Request, conn: sqlite3.Connection = 
     missing = [i for i in ids if i not in day_ids]
     if missing:
         raise HTTPException(status_code=422, detail=f"los pedidos {missing} no son de ese día")
+    for order_id in ids:
+        _check_truck_fits(conn, order_id, body.vehicle_id)
     store.set_sequence(conn, body.vehicle_id, trips)
     request.app.state.on_change(body.date)
 
@@ -92,7 +120,17 @@ def patch_order(
     order_id: int, body: OrderPatch, request: Request, conn: sqlite3.Connection = Depends(get_conn)
 ) -> OrderOut:
     day = _day_of(conn, order_id)
-    order = store.update_order_kg(conn, order_id, body.kg)
+    sent = body.model_fields_set
+    if not sent & {"kg", "window_start", "window_end"}:
+        raise HTTPException(status_code=422, detail="no hay nada que cambiar")
+    if "kg" in sent:
+        if body.kg is None:
+            raise HTTPException(status_code=422, detail="los kilos no pueden quedar vacíos")
+        order = store.update_order_kg(conn, order_id, body.kg)
+    if sent & {"window_start", "window_end"}:
+        current = store.get_order(conn, order_id)
+        _check_within_hours(store.get_client(conn, current.client_code), body.window_start, body.window_end)
+        order = store.set_order_window(conn, order_id, body.window_start, body.window_end)
     request.app.state.on_change(day)
     return _orders_out(conn, day, [order])[0]
 
@@ -134,6 +172,7 @@ def set_lock(
     max_trips = store.get_params(conn).max_trips_per_vehicle
     if body.trip_no is not None and body.trip_no > max_trips:
         raise HTTPException(status_code=422, detail=f"el viaje debe estar entre 1 y {max_trips}")
+    _check_truck_fits(conn, order_id, body.vehicle_id)
     store.set_lock(conn, order_id, body.vehicle_id, body.trip_no)
     request.app.state.on_change(day)
     return body
