@@ -26,7 +26,10 @@ export type Params = {
   diesel_mxn_per_liter: number;
   loading_mxn_per_kg: number;
   shift_minutes: number;
+  /** Minutos fijos por parada, aparte de la descarga. */
   service_minutes: number;
+  /** Descarga en el cliente: minutos por tonelada entregada. */
+  unload_minutes_per_ton: number;
   reload_minutes: number;
   max_trips_per_vehicle: number;
   time_limit_s: number;

@@ -67,7 +67,7 @@ def test_patch_and_delete_order(client):
 
 
 def test_scenarios_listed(client):
-    assert client.get("/api/scenarios").json() == ["ligero", "normal", "pesado", "inviable"]
+    assert client.get("/api/scenarios").json() == ["ligero", "promedio", "normal", "pesado", "inviable"]
 
 
 def test_load_scenario_replaces_day(client, clients):

@@ -5,9 +5,13 @@ import random
 
 from hcvrp.domain import Client, Order
 
-SCENARIOS = ("ligero", "normal", "pesado", "inviable")
+# "promedio" es un día típico de reparto: 12 a 15 entregas y 50 a 60 toneladas. "pesado" trae
+# más de lo que la flota alcanza a descargar en una jornada: sirve para ver qué pasa a otro día.
+SCENARIOS = ("ligero", "promedio", "normal", "pesado", "inviable")
 
-_SPEC = {"ligero": (12, 40_000), "normal": (20, 80_000), "pesado": (28, 120_000)}
+_SPEC = {
+    "ligero": (12, 40_000), "promedio": (14, 55_000), "normal": (20, 80_000), "pesado": (28, 120_000),
+}
 _MIN_KG, _MAX_KG = 500, 15_000
 _TOLERANCE = 0.05  # objetivo de ajuste interno (la cota exigida es +-15 %)
 

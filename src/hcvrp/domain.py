@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -94,10 +95,16 @@ class Params:
     diesel_mxn_per_liter: float = 27.0
     loading_mxn_per_kg: float = 0.10
     shift_minutes: int = 480
-    service_minutes: int = 20
+    # Tiempo en cada parada = fijo (llegar, acomodarse, papeles) + descarga según los kilos.
+    service_minutes: int = 0
+    unload_minutes_per_ton: float = 15.0
     reload_minutes: int = 120
     max_trips_per_vehicle: int = 3
     time_limit_s: int = 15
+
+    def service_time(self, kg: int) -> int:
+        """Minutos que dura la entrega de `kg` en el cliente (la descarga se redondea hacia arriba)."""
+        return self.service_minutes + math.ceil(kg * self.unload_minutes_per_ton / 1000 - 1e-9)
 
 
 @dataclass(frozen=True)

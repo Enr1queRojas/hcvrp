@@ -5,7 +5,9 @@ import pytest
 from hcvrp.scenarios import SCENARIOS, generate_scenario
 
 
-@pytest.mark.parametrize("name,n,total", [("ligero", 12, 40_000), ("normal", 20, 80_000), ("pesado", 28, 120_000)])
+@pytest.mark.parametrize("name,n,total", [
+    ("ligero", 12, 40_000), ("promedio", 14, 55_000), ("normal", 20, 80_000), ("pesado", 28, 120_000),
+])
 def test_sizes_and_totals(clients, name, n, total):
     s = generate_scenario(name, clients)
     assert len(s) == n and len({o.client_code for o in s}) == n

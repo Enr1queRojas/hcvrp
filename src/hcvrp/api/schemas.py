@@ -111,7 +111,8 @@ class ParamsIO(BaseModel):
     diesel_mxn_per_liter: float = Field(gt=0)
     loading_mxn_per_kg: float = Field(ge=0)
     shift_minutes: int = Field(ge=60, le=900)
-    service_minutes: int = Field(ge=0, le=120)
+    service_minutes: int = Field(ge=0, le=120)  # fijo por parada, aparte de la descarga
+    unload_minutes_per_ton: float = Field(default=15.0, ge=0, le=120)
     reload_minutes: int = Field(ge=0, le=480)
     max_trips_per_vehicle: int = Field(ge=1, le=6)
     time_limit_s: int = Field(ge=1, le=60)

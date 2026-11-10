@@ -208,3 +208,30 @@ def test_blocked_trucks_persist(conn):
 def test_puesta_persists(conn):
     upsert_client(conn, Client("X", "X", "", None, LocationStatus.PENDIENTE, puesta=True))
     assert get_client(conn, "X").puesta is True
+
+
+def test_old_params_get_the_unload_rate(tmp_path):
+    """BD anteriores: la entrega eran 20 min fijos por parada; ahora la descarga va por tonelada."""
+    import json
+
+    db = tmp_path / "old.db"
+    conn = connect(db)
+    old = {
+        "diesel_mxn_per_liter": 25.5, "loading_mxn_per_kg": 0.1, "shift_minutes": 480,
+        "service_minutes": 20, "reload_minutes": 90, "max_trips_per_vehicle": 3, "time_limit_s": 15,
+    }
+    conn.execute("INSERT OR REPLACE INTO params (id, json) VALUES (1, ?)", (json.dumps(old),))
+    conn.commit()
+    conn.close()
+
+    params = get_params(connect(db))
+    assert (params.unload_minutes_per_ton, params.service_minutes) == (15.0, 0)
+    assert (params.diesel_mxn_per_liter, params.reload_minutes) == (25.5, 90)  # lo demás no cambia
+
+    # Solo se migra una vez: lo que el usuario ajuste después se respeta.
+    conn = connect(db)
+    set_params(conn, Params(service_minutes=10, unload_minutes_per_ton=12))
+    conn.close()
+    params = get_params(connect(db))
+    assert (params.unload_minutes_per_ton, params.service_minutes) == (12, 10)
+

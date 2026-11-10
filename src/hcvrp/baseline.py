@@ -40,7 +40,7 @@ def baseline_plan(problem: Problem, provider: DistanceProvider) -> tuple[Plan, M
                     begin = max(t + go, earliest)  # espera si llega antes de poder entregar
                     if latest is not None and begin > latest:
                         continue
-                    if begin + params.service_minutes + back > params.shift_minutes:
+                    if begin + params.service_time(o.kg) + back > params.shift_minutes:
                         continue
                     if best is None or go < best[0]:
                         best = (go, o, begin)
@@ -50,7 +50,7 @@ def baseline_plan(problem: Problem, provider: DistanceProvider) -> tuple[Plan, M
                 trip.append(o)
                 pending.remove(o)
                 load += o.kg
-                t = begin + params.service_minutes
+                t = begin + params.service_time(o.kg)
                 pos = o.client_code
             if not trip:
                 break

@@ -74,7 +74,7 @@ export function Orders({ date, onChanged }: Props) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [scenarios, setScenarios] = useState<string[]>([]);
-  const [scenario, setScenario] = useState("normal");
+  const [scenario, setScenario] = useState("promedio");
   const [clientCode, setClientCode] = useState("");
   const [kgValue, setKgValue] = useState("");
   const [fromValue, setFromValue] = useState("");

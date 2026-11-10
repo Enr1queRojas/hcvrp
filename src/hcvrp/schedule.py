@@ -8,17 +8,21 @@ from hcvrp.domain import (
 DEPOT_KEY = "DEPOT"
 
 
-def service_bounds(order: Order, client: Client | None, params: Params) -> tuple[int, int | None]:
+def service_bounds(
+    order: Order, client: Client | None, params: Params, kg: int | None = None
+) -> tuple[int, int | None]:
     """(inicio más temprano, inicio más tardío) de la entrega, en minutos de jornada.
 
     Combina el "desde" del pedido con el horario del cliente; ambos son firmes. El inicio más
-    tardío deja tiempo para terminar la entrega antes de que cierre. None: sin límite.
+    tardío deja tiempo para terminar de descargar antes de que cierre: depende de los kilos que
+    se entregan (`kg`; por omisión, el pedido completo). None: sin límite.
     """
     earliest = order.window_start or 0
     latest = None
     if client is not None:
         earliest = max(earliest, client.opens_at - SHIFT_START_MIN)
-        latest = client.closes_at - SHIFT_START_MIN - params.service_minutes
+        delivered = order.kg if kg is None else kg
+        latest = client.closes_at - SHIFT_START_MIN - params.service_time(delivered)
     return earliest, latest
 
 
@@ -36,7 +40,7 @@ def build_trip(
         reached = t + matrix.minutes(prev, o.client_code)
         earliest, _ = service_bounds(o, (clients or {}).get(o.client_code), params)
         arrival = max(reached, earliest)  # si llega antes de que se pueda entregar, espera
-        t = arrival + params.service_minutes
+        t = arrival + params.service_time(o.kg)
         km += matrix.km(prev, o.client_code)
         stops.append(Stop(
             o.order_id, o.client_code, o.kg, arrival, t,

@@ -8,14 +8,20 @@ from hcvrp.solver import solve
 from hcvrp.validate import validate
 
 
-@pytest.mark.parametrize("name", ["ligero", "normal", "pesado"])
+@pytest.mark.parametrize("name", ["ligero", "promedio", "normal"])
 def test_all_served_and_valid(problem_for, name):
     p = problem_for(name); plan, m = solve(p, HaversineProvider())
     assert plan.unserved == () and validate(p, plan, m) == []
 
 
-def test_pesado_needs_reloads(problem_for):
-    plan, _ = solve(problem_for("pesado"), HaversineProvider())
+def test_pesado_saturates_the_shift_and_reloads(problem_for):
+    """120 t no se alcanzan a descargar en una jornada: lo que no cabe pasa a otro día."""
+    from hcvrp.baseline import baseline_plan, served_kg
+
+    p = problem_for("pesado"); plan, m = solve(p, HaversineProvider())
+    assert validate(p, plan, m) == []
+    assert plan.unserved and {u.reason for u in plan.unserved} == {UnservedReason.SATURACION_FLOTA}
+    assert served_kg(plan) >= served_kg(baseline_plan(p, HaversineProvider())[0])
     assert plan.reloads >= 1
     assert all(t.end_min <= 480 for v in plan.vehicles for t in v.trips)
 
@@ -114,7 +120,7 @@ def test_vehicle_only_lock_lets_plan_choose_trip(problem_for):
 
 
 def test_manual_order_respected(problem_for):
-    p = problem_for("pesado")
+    p = problem_for("ligero")  # con holgura: el orden a mano no debe costar entregas
     base, _ = solve(p, HaversineProvider())
     found = next(
         ((v.vehicle_id, t.trip_no, [s.order_id for s in t.stops])

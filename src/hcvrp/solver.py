@@ -16,10 +16,13 @@ Bloqueos: (camión, viaje) fija ambos; (camión, None) solo el camión. El orden
 posición del mismo (camión, viaje), el rango debe crecer en el orden dado. Otros pedidos
 pueden quedar intercalados.
 
+Descarga: cada entrega dura `Params.service_time(kg)` (fijo por parada + minutos por tonelada),
+así que pesa en la jornada y en el horario del cliente según los kilos que se bajan.
+
 Horarios de entrega (`Order.window_start/window_end`) y de recepción del cliente
-(`Client.opens_at/closes_at`): solo si alguno restringe de verdad, la dimensión de tiempo admite
-espera (holgura). El horario del cliente y `window_start` son firmes (el camión espera; nunca se
-agenda fuera de lo que el cliente recibe);
+(`Client.opens_at/closes_at`): solo si algún "no antes de" obliga a esperar, la dimensión de
+tiempo admite espera (holgura). El horario del cliente y `window_start` son firmes (el camión
+espera; nunca se agenda fuera de lo que el cliente recibe: la descarga termina antes del cierre);
 `window_end` es blando: cada minuto tarde cuesta LATE_PENALTY_PER_MIN, y la penalización por
 descartar un pedido supera cualquier retraso posible, así que nunca se dejan kilos por cumplir
 un horario.
@@ -39,8 +42,8 @@ vacío (recarga justo antes de cerrar) se descarta al armar el plan.
 Con copias por vehículo y restricciones de CP entre sus cumuls, la búsqueda local de
 OR-Tools 9.15 rechazaba todo movimiento (descartaba todos los pedidos).
 
-El horario final lo recalcula `schedule.build_vehicle_plan` (sin esperas), que coincide
-con el del solver (holgura de tiempo 0).
+El horario final lo recalcula `schedule.build_vehicle_plan` (cada camión sale en cuanto puede
+y espera en la puerta del cliente si llega antes), que nunca es más tardío que el del solver.
 """
 from __future__ import annotations
 
@@ -50,7 +53,7 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from hcvrp.domain import Order, Plan, Problem, Unserved, UnservedReason, Vehicle, puesta_amounts
 from hcvrp.geo.matrix import DistanceProvider, Matrix
-from hcvrp.precheck import points_for, precheck
+from hcvrp.precheck import alone_reason, points_for, precheck
 from hcvrp.schedule import DEPOT_KEY, build_vehicle_plan, service_bounds, summarize
 from hcvrp.validate import validate
 
@@ -81,7 +84,9 @@ def solve(problem: Problem, provider: DistanceProvider) -> tuple[Plan, Matrix]:
             start = {vid: [[o.order_id for o in t] for t in trips if t] for vid, trips in routes.items()}
             routes, dropped, short = _route(problem, matrix, planeable, trucks, puesta_ids, start)
         _check_locks_honored(problem, planeable, routes)
-        unserved = unserved + [Unserved(o.order_id, _drop_reason(problem, o, trucks)) for o in dropped]
+        unserved = unserved + [
+            Unserved(o.order_id, _drop_reason(problem, o, trucks, matrix)) for o in dropped
+        ]
         unserved += [Unserved(oid, UnservedReason.PUESTA_PARCIAL, kg) for oid, kg in short.items()]
 
     vehicle_plans = [
@@ -95,13 +100,17 @@ def solve(problem: Problem, provider: DistanceProvider) -> tuple[Plan, Matrix]:
     return plan, matrix
 
 
-def _drop_reason(problem: Problem, order: Order, trucks: list[Vehicle]) -> UnservedReason:
-    """Un pedido con puesta más grande que cualquier camión llega aquí si ni su parte cupo."""
-    client = problem.clients.get(order.client_code)
-    fits = [t.capacity_kg for t in trucks if client is None or client.can_receive(t.vehicle_id)]
+def _drop_reason(
+    problem: Problem, order: Order, trucks: list[Vehicle], matrix: Matrix
+) -> UnservedReason:
+    """Un pedido que solo era planeable por su puesta (excede a los camiones, o su descarga
+    completa no cabe en el horario o la jornada) llega aquí si ni la puesta cupo: el motivo es
+    el del pedido completo. Lo demás que queda fuera es saturación."""
+    client = problem.clients[order.client_code]
+    fits = [t.capacity_kg for t in trucks if client.can_receive(t.vehicle_id)]
     if fits and order.kg > max(fits):
         return UnservedReason.EXCEDE_CAPACIDAD
-    return UnservedReason.SATURACION_FLOTA
+    return alone_reason(order, client, problem.params, matrix) or UnservedReason.SATURACION_FLOTA
 
 
 def _check_locks_honored(
@@ -223,35 +232,44 @@ def _route(
     for node, idx in reload_idx.items():
         capacity.SlackVar(idx).SetRange(0, trucks[reload_owner[node]].capacity_kg)
 
-    # Tiempo: viaje + servicio en el nodo de origen (entrega o recarga). Holgura 0.
-    service = [0] + [params.service_minutes] * n + [params.reload_minutes] * len(reload_owner)
+    # Tiempo: viaje + lo que tarda el nodo de origen (descarga según sus kilos, o recarga).
+    service = (
+        [0] + [params.service_time(o.kg) for o in orders] + [params.reload_minutes] * len(reload_owner)
+    )
     time_table = [[matrix.minutes(a, b) + service[ia] for b in keys] for ia, a in enumerate(keys)]
     time_cb = routing.RegisterTransitCallback(
         lambda i, j: time_table[manager.IndexToNode(i)][manager.IndexToNode(j)]
     )
     # Inicio de la entrega: [más temprano, más tardío] firme (pedido + cliente) y "hasta" blando.
     bounds = {
-        node: service_bounds(o, problem.clients.get(o.client_code), params)
+        node: service_bounds(o, problem.clients[o.client_code], params)
         for node, o in enumerate(orders, start=1)
     }
-    windowed = [
-        (node, o) for node, o in enumerate(orders, start=1)
-        if o.window_end is not None
-        or bounds[node][0] > 0
-        or (bounds[node][1] is not None and bounds[node][1] < params.shift_minutes)
-    ]
-    wait_max = params.shift_minutes if windowed else 0
-    routing.AddDimension(time_cb, wait_max, params.shift_minutes, True, "Time")
+    # Una entrega que no cabe ni yendo sola (el pedido completo cuando solo cabe su puesta) queda
+    # fuera del modelo: sus límites serían contradictorios.
+    alone = {
+        node: alone_reason(o, problem.clients[o.client_code], params, matrix) is None
+        for node, o in enumerate(orders, start=1)
+    }
+    # Solo un "no antes de" obliga a esperar; con puros límites superiores la holgura sobra.
+    needs_wait = any(alone[node] and bounds[node][0] > 0 for node in alone)
+    soft = [node for node, o in enumerate(orders, start=1) if alone[node] and o.window_end is not None]
+    routing.AddDimension(
+        time_cb, params.shift_minutes if needs_wait else 0, params.shift_minutes, True, "Time"
+    )
     time_dim = routing.GetDimensionOrDie("Time")
-    if windowed:
+    if needs_wait:
         time_dim.SetSlackCostCoefficientForAllVehicles(WAIT_COST_PER_MIN)
-    for node, o in windowed:
+    for node, o in enumerate(orders, start=1):
         idx = manager.NodeToIndex(node)
+        if not alone[node]:
+            routing.VehicleVar(idx).SetValues([-1])
+            continue
         earliest, latest = bounds[node]
         if earliest > 0:
-            time_dim.CumulVar(idx).SetMin(min(earliest, params.shift_minutes))
+            time_dim.CumulVar(idx).SetMin(earliest)
         if latest is not None and latest < params.shift_minutes:
-            time_dim.CumulVar(idx).SetMax(max(latest, 0))
+            time_dim.CumulVar(idx).SetMax(latest)
         if o.window_end is not None:
             time_dim.SetCumulVarSoftUpperBound(idx, o.window_end, LATE_PENALTY_PER_MIN)
 
@@ -276,7 +294,9 @@ def _route(
     # cualquier costo posible de ruta (así un pedido de 1 kg nunca se descarta por costar más).
     route_cost_bound = max_arc * (n_nodes + 1) + sum(
         1 + round(t.fixed_dispatch_cost_mxn * 100) for t in trucks
-    ) + LATE_PENALTY_PER_MIN * params.shift_minutes * len(windowed)
+    ) + LATE_PENALTY_PER_MIN * params.shift_minutes * len(soft) + (
+        WAIT_COST_PER_MIN * params.shift_minutes * len(trucks) if needs_wait else 0
+    )
     # Un pedido bloqueado cuesta más descartarlo que todos los libres juntos: la búsqueda nunca
     # cambia uno bloqueado por otros más pesados (y si queda fuera, el bloqueo era imposible).
     penalty = [o.kg * DROP_PENALTY_PER_KG + route_cost_bound for o in full]
