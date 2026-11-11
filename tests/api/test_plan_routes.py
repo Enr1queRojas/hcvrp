@@ -45,7 +45,7 @@ def test_edit_marks_stale_then_refreshes(client):
 def test_result_discarded_if_data_changed_during_compute(settings, monkeypatch):
     calls = []
 
-    def fake_run(problem, provider, geometry=None):
+    def fake_run(problem, provider, geometry=None, **kwargs):
         calls.append(1)
         if len(calls) == 1:
             add_order(connect(settings.db_path), DAY, "AARON", 1)
@@ -80,7 +80,7 @@ def test_impossible_lock_gives_error_and_keeps_last_plan(client):
 
 
 def test_unexpected_failure_keeps_thread_alive(settings, monkeypatch):
-    def boom(problem, provider, geometry=None):
+    def boom(problem, provider, geometry=None, **kwargs):
         raise KeyError("secreto interno")
 
     monkeypatch.setattr("hcvrp.api.planning.run_planning", boom)
@@ -90,7 +90,7 @@ def test_unexpected_failure_keeps_thread_alive(settings, monkeypatch):
     assert recalc.wait_idle(30)
     row = get_plan_row(connect(settings.db_path), DAY)
     assert row["status"] == "error" and row["error"] == "error interno al calcular el plan"
-    monkeypatch.setattr("hcvrp.api.planning.run_planning", lambda p, q, geometry=None: {"marca": 1})
+    monkeypatch.setattr("hcvrp.api.planning.run_planning", lambda p, q, geometry=None, **kwargs: {"marca": 1})
     add_order(connect(settings.db_path), DAY, "AARON", 1)
     recalc.request(DAY)
     assert recalc.wait_idle(30)

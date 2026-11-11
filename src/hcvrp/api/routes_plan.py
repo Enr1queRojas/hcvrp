@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 @router.get("/plan")
 def get_plan(date: Date, request: Request, conn: sqlite3.Connection = Depends(get_conn)) -> PlanStatusOut:
+    request.app.state.recalc.touch(date)  # alguien la está viendo: su plan se calcula primero
     row = store.get_plan_row(conn, date)
     problem = build_problem(conn, date)
     if row is None and not problem.orders:

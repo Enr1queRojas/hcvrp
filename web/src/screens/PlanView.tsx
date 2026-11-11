@@ -161,7 +161,11 @@ export function PlanView({ date, status, config, onChanged }: Props) {
     <section className="page">
       <div className="plan-head">
         <h1>Plan</h1>
-        <button type="button" onClick={() => change(() => api(`/api/plan/recalcular?date=${date}`, { method: "POST" }))}>
+        <button
+          type="button"
+          title="Busca a fondo: usa todo el tiempo máximo de cálculo, aunque el plan ya no mejore pronto"
+          onClick={() => change(() => api(`/api/plan/recalcular?date=${date}`, { method: "POST" }))}
+        >
           Recalcular
         </button>
       </div>
@@ -263,6 +267,12 @@ export function PlanView({ date, status, config, onChanged }: Props) {
                   </tbody>
                 </table>
               </div>
+              {plan.unserved.some((u) => u.reason === "saturacion_flota") && (
+                <p className="hint">
+                  El plan se calcula rápido al hacer cambios. Si crees que cabe más, Recalcular busca a fondo con todo
+                  el tiempo máximo de cálculo.
+                </p>
+              )}
             </>
           )}
 
