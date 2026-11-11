@@ -55,6 +55,7 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from hcvrp.domain import Order, Plan, Problem, Unserved, UnservedReason, Vehicle, puesta_amounts
 from hcvrp.geo.matrix import DistanceProvider, Matrix
+from hcvrp.manual import Routes, anchored_routes, manual_violations
 from hcvrp.precheck import alone_reason, points_for, precheck
 from hcvrp.schedule import DEPOT_KEY, build_vehicle_plan, service_bounds, summarize
 from hcvrp.validate import validate
@@ -72,6 +73,11 @@ EXTRA_TRIP_COST = 10  # centavos por recarga; desempate: menos recargas
 STALL_S = 1.5
 STALL_WITH_KILOS_OUT_S = 5.0
 STALL_RATIO = 1.0
+
+# Con un plan anterior, se conserva (con lo fijado a mano aplicado) salvo que la búsqueda encuentre
+# uno que entregue más, llegue menos tarde o ahorre al menos esto: mover dos paradas de un camión
+# no debe cambiar qué se carga en los demás por unos pesos, ni por un plan equivalente.
+KEEP_PLAN_MXN = 50.0
 
 
 class SearchCancelled(Exception):
@@ -98,13 +104,52 @@ class SearchControl:
     passes: list[SearchStats] = field(default_factory=list)
 
 
+def _late(plan: Plan) -> int:
+    return sum(s.late_min for v in plan.vehicles for t in v.trips for s in t.stops)
+
+
+def _kg(plan: Plan) -> int:
+    return sum(t.kg for v in plan.vehicles for t in v.trips)
+
+
+def _anchor(
+    problem: Problem, previous: Routes, planeable: list[Order], unserved: list[Unserved], matrix: Matrix
+) -> tuple[Routes, Plan] | None:
+    """El plan anterior con lo fijado a mano aplicado, si sigue siendo válido y entrega todo."""
+    by_id = {o.order_id: o for o in planeable}
+    routes = anchored_routes(previous, problem)
+    if any(oid not in by_id for trips in routes.values() for trip in trips for oid in trip):
+        return None
+    try:
+        plans = [
+            build_vehicle_plan(vid, [[by_id[oid] for oid in trip] for trip in trips], matrix, problem.params, problem.clients)
+            for vid, trips in routes.items()
+        ]
+        plan = summarize(problem, plans, unserved, matrix)
+    except KeyError:
+        return None
+    return None if validate(problem, plan, matrix) else (routes, plan)
+
+
 def solve(
-    problem: Problem, provider: DistanceProvider, control: SearchControl | None = None
+    problem: Problem,
+    provider: DistanceProvider,
+    control: SearchControl | None = None,
+    previous: Routes | None = None,
 ) -> tuple[Plan, Matrix]:
+    """`previous`: las rutas del plan vigente ({camión: [[pedidos del viaje]]}). Si con lo fijado
+    a mano siguen siendo válidas, se conservan salvo mejora real (KEEP_PLAN_MXN); una búsqueda
+    a fondo (`control.thorough`) las ignora."""
     control = control or SearchControl()
     matrix = provider.matrix(points_for(problem))
     planeable, unserved = precheck(problem, matrix)
+    broken = manual_violations(problem, matrix)
+    if broken:
+        raise ValueError("ajuste imposible: " + "; ".join(broken))
     trucks = [v for v in problem.vehicles if v.available]
+    anchor = None
+    if previous and planeable and trucks and not control.thorough:
+        anchor = _anchor(problem, previous, planeable, unserved, matrix)
 
     if not planeable:
         routes: dict[str, list[list[Order]]] = {}
@@ -112,7 +157,9 @@ def solve(
         routes = {}
         unserved = unserved + [Unserved(o.order_id, UnservedReason.SATURACION_FLOTA) for o in planeable]
     else:
-        routes, dropped, short = _route(problem, matrix, planeable, trucks, control)
+        routes, dropped, short = _route(
+            problem, matrix, planeable, trucks, control, start=anchor[0] if anchor else None
+        )
         puesta_ids = {
             o.order_id for o in dropped
             if o.order_id not in problem.locks
@@ -135,6 +182,14 @@ def solve(
     violations = validate(problem, plan, matrix)
     if violations:
         raise AssertionError("plan inválido:\n" + "\n".join(violations))
+    if anchor is not None:
+        kept = anchor[1]
+        better = (
+            _kg(plan) > _kg(kept) or _late(plan) < _late(kept)
+            or (_late(plan) == _late(kept) and plan.cost_mxn < kept.cost_mxn - KEEP_PLAN_MXN)
+        )
+        if not better:
+            return kept, matrix
     return plan, matrix
 
 

@@ -102,3 +102,17 @@ export function windowText(start: number | null, end: number | null): string {
   if (start !== null) return `desde las ${hhmm(start)}`;
   return "";
 }
+
+/**
+ * El código del cliente que el usuario quiso escribir: acepta el código o el nombre exacto, sin
+ * importar mayúsculas. Si no coincide con ninguno, devuelve lo escrito tal cual.
+ */
+export function resolveClientCode(typed: string, clients: { code: string; name: string }[]): string {
+  const text = typed.trim();
+  const lower = text.toLowerCase();
+  const match =
+    clients.find((c) => c.code === text) ??
+    clients.find((c) => c.code.toLowerCase() === lower) ??
+    clients.find((c) => c.name.toLowerCase() === lower);
+  return match ? match.code : text;
+}

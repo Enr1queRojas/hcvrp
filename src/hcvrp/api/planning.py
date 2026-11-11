@@ -106,18 +106,29 @@ class FreePlans:
             del self._plans[next(iter(self._plans))]
 
 
+def previous_routes(result: dict | None) -> dict[str, list[list[str]]] | None:
+    """Las rutas de un plan guardado ({camión: [[pedidos del viaje]]})."""
+    if not result:
+        return None
+    return {
+        v["vehicle_id"]: [[s["order_id"] for s in t["stops"]] for t in v["trips"]]
+        for v in result.get("vehicles", [])
+    }
+
+
 def run_planning(
     problem: Problem,
     provider: DistanceProvider,
     geometry: GeometryFn | None = None,
     control: SearchControl | None = None,
     free_plans: FreePlans | None = None,
+    previous: dict | None = None,
 ) -> dict:
     """Calcula el plan y lo deja listo para la pantalla. Lanza `SearchCancelled` si `control`
     corta la búsqueda."""
     free_plans = free_plans if free_plans is not None else FreePlans()
     try:
-        plan, _ = solve(problem, provider, control)
+        plan, _ = solve(problem, provider, control, previous_routes(previous))
         baseline, _ = baseline_plan(problem, provider)
         lock_cost_diff = None
         if not problem.locks:
@@ -297,7 +308,7 @@ class Recalculator:
                 result = run_planning(
                     problem, self.provider, self.geometry,
                     control=SearchControl(should_stop=outdated, thorough=forced),
-                    free_plans=self._free_plans,
+                    free_plans=self._free_plans, previous=row["result"] if row else None,
                 )
             except SearchCancelled:
                 self._requeue(day)

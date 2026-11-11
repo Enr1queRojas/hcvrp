@@ -26,9 +26,9 @@ def test_free_plan_is_not_recomputed_on_every_manual_change(settings, monkeypatc
     solved = []  # True: con pedidos fijados; False: el plan sin fijar
     real = planning.solve
 
-    def counting(problem, provider, control=None):
+    def counting(problem, provider, control=None, previous=None):
         solved.append(bool(problem.locks))
-        return real(problem, provider, control)
+        return real(problem, provider, control, previous)
 
     monkeypatch.setattr(planning, "solve", counting)
     free_plans = FreePlans()

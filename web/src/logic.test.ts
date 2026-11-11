@@ -140,3 +140,21 @@ describe("api", () => {
     await expect(api("/api/me")).rejects.toEqual(new ApiError(0, "no hay conexión con el servidor"));
   });
 });
+
+describe("cliente al capturar un pedido", () => {
+  const clients = [
+    { code: "AARON", name: "Aarón López" },
+    { code: "lupita", name: "Abarrotes Lupita" },
+  ];
+  it("acepta el código sin importar mayúsculas", async () => {
+    const { resolveClientCode } = await import("./format");
+    expect(resolveClientCode(" aaron ", clients)).toBe("AARON");
+    expect(resolveClientCode("LUPITA", clients)).toBe("lupita");
+    expect(resolveClientCode("lupita", clients)).toBe("lupita");
+  });
+  it("acepta el nombre exacto y deja pasar lo desconocido", async () => {
+    const { resolveClientCode } = await import("./format");
+    expect(resolveClientCode("abarrotes lupita", clients)).toBe("lupita");
+    expect(resolveClientCode("nadie", clients)).toBe("nadie");
+  });
+});

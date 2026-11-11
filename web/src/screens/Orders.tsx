@@ -1,6 +1,6 @@
 import { FocusEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, messageOf } from "../api";
-import { clockToMinute, kg, lockText, minuteToClock } from "../format";
+import { clockToMinute, kg, lockText, minuteToClock, resolveClientCode } from "../format";
 import type { Client, Order } from "../types";
 
 type Props = { date: string; onChanged: () => void };
@@ -108,7 +108,7 @@ export function Orders({ date, onChanged }: Props) {
 
   const add = async (e: FormEvent) => {
     e.preventDefault();
-    const code = clientCode.trim().toUpperCase();
+    const code = resolveClientCode(clientCode, clients);
     const window = readWindow(fromValue, toValue);
     if (typeof window === "string") {
       setError(window);
@@ -137,7 +137,7 @@ export function Orders({ date, onChanged }: Props) {
 
   const total = orders.reduce((sum, o) => sum + o.kg, 0);
   const hoursOf = (code: string): Hours => clients.find((c) => c.code === code);
-  const pickedHours = hoursOf(clientCode.trim().toUpperCase());
+  const pickedHours = hoursOf(resolveClientCode(clientCode, clients));
 
   return (
     <section className="page narrow">

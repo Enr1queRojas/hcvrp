@@ -99,7 +99,7 @@ def test_infeasible_lock_raises_value_error_not_assertion(problem_ab):
     with pytest.raises(ValueError) as exc:
         solve(p, HaversineProvider())
     msg = str(exc.value)
-    assert "o1" in msg and "V1" in msg and "viaje 1" in msg
+    assert "Cliente A" in msg and "V1" in msg and "viaje 1" in msg and "15,000 kg" in msg and "10,000 kg" in msg
 
 
 def test_tiny_far_order_is_served(problem_ab):
