@@ -22,7 +22,7 @@ from hcvrp.geo.cache import CachedProvider
 from hcvrp.geo.directions import OrsDirections, straight_line
 from hcvrp.geo.matrix import DistanceProvider, HaversineProvider, Matrix
 from hcvrp.geo.ors import OrsProvider
-from hcvrp.solver import solve
+from hcvrp.solver import SearchCancelled, SearchControl, solve
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +81,67 @@ def inputs_hash(problem: Problem, provider: str = "haversine") -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def run_planning(problem: Problem, provider: DistanceProvider, geometry: GeometryFn | None = None) -> dict:
+class FreePlans:
+    """Costo y kilos del plan sin nada fijado, por datos de entrada.
+
+    Fijar o mover un pedido no cambia ese plan, así que no hay que volver a calcularlo en cada
+    ajuste a mano para decir cuánto cuesta lo fijado. Vive en memoria: se rehace al reiniciar.
+    """
+
+    def __init__(self, size: int = 64):
+        self.size = size
+        self._plans: dict[str, tuple[float, int]] = {}
+
+    @staticmethod
+    def key(problem: Problem) -> str:
+        return inputs_hash(dataclasses.replace(problem, locks={}, positions={}))
+
+    def get(self, problem: Problem) -> tuple[float, int] | None:
+        return self._plans.get(self.key(problem))
+
+    def put(self, problem: Problem, cost_mxn: float, kg: int) -> None:
+        self._plans.pop(key := self.key(problem), None)
+        self._plans[key] = (cost_mxn, kg)
+        while len(self._plans) > self.size:
+            del self._plans[next(iter(self._plans))]
+
+
+def previous_routes(result: dict | None) -> dict[str, list[list[str]]] | None:
+    """Las rutas de un plan guardado ({camión: [[pedidos del viaje]]})."""
+    if not result:
+        return None
+    return {
+        v["vehicle_id"]: [[s["order_id"] for s in t["stops"]] for t in v["trips"]]
+        for v in result.get("vehicles", [])
+    }
+
+
+def run_planning(
+    problem: Problem,
+    provider: DistanceProvider,
+    geometry: GeometryFn | None = None,
+    control: SearchControl | None = None,
+    free_plans: FreePlans | None = None,
+    previous: dict | None = None,
+) -> dict:
+    """Calcula el plan y lo deja listo para la pantalla. Lanza `SearchCancelled` si `control`
+    corta la búsqueda."""
+    free_plans = free_plans if free_plans is not None else FreePlans()
     try:
-        plan, _ = solve(problem, provider)
+        plan, _ = solve(problem, provider, control, previous_routes(previous))
         baseline, _ = baseline_plan(problem, provider)
         lock_cost_diff = None
-        if problem.locks:
-            free, _ = solve(dataclasses.replace(problem, locks={}, positions={}), provider)
-            lock_cost_diff = plan.cost_mxn - free.cost_mxn
+        if not problem.locks:
+            free_plans.put(problem, plan.cost_mxn, served_kg(plan))
+        else:
+            free = free_plans.get(problem)
+            if free is None:
+                free_plan, _ = solve(dataclasses.replace(problem, locks={}, positions={}), provider, control)
+                free = (free_plan.cost_mxn, served_kg(free_plan))
+                free_plans.put(problem, *free)
+            lock_cost_diff = plan.cost_mxn - free[0]
             # Con tiempo limitado el plan libre puede salir peor que el bloqueado.
-            if served_kg(plan) == served_kg(free):
+            if served_kg(plan) == free[1]:
                 lock_cost_diff = max(lock_cost_diff, 0.0)
     except ValueError as e:
         raise PlanningError(_in_spanish(str(e), problem)) from e
@@ -121,8 +172,16 @@ def make_geometry(settings: Settings) -> GeometryFn:
     return straight_line if settings.provider == "haversine" else OrsDirections()
 
 
+VIEWED_S = 30.0  # una fecha cuenta como "a la vista" este rato después de la última consulta
+
+
 class Recalculator:
-    """Un solo hilo que recalcula las fechas pedidas, agrupando cambios seguidos."""
+    """Un solo hilo que recalcula las fechas pedidas, agrupando cambios seguidos.
+
+    Primero la fecha que alguien está viendo, luego hoy y los días que vienen, y al final los
+    que ya pasaron. Si los datos de la fecha en cálculo cambian, ese cálculo se corta: su
+    resultado ya no serviría.
+    """
 
     def __init__(self, settings: Settings, provider: DistanceProvider, geometry: GeometryFn | None = None):
         self.settings = settings
@@ -130,7 +189,10 @@ class Recalculator:
         self.geometry = geometry
         self._cond = threading.Condition()
         self._pending: dict[date, tuple[float, bool]] = {}  # fecha -> (última petición, forzada)
+        self._viewed: dict[date, float] = {}  # fecha -> última vez que la pantalla la consultó
         self._running: date | None = None
+        self._recheck = threading.Event()  # llegó una petición para la fecha en cálculo
+        self._free_plans = FreePlans()
         self._stopping = False
         self._resume = threading.Event()
         self._resume.set()
@@ -138,6 +200,8 @@ class Recalculator:
         self._thread.start()
 
     def request(self, day: date | None, force: bool = False) -> None:
+        """Pide recalcular una fecha (None: todas las que tienen pedidos). `force`: aunque sus
+        datos no hayan cambiado, y buscando a fondo (todo el tiempo de cálculo)."""
         if day is None:
             conn = connect(self.settings.db_path)
             try:
@@ -150,7 +214,14 @@ class Recalculator:
             for d in days:
                 forced = force or self._pending.get(d, (0.0, False))[1]
                 self._pending[d] = (time.monotonic(), forced)
+                if d == self._running:
+                    self._recheck.set()
             self._cond.notify_all()
+
+    def touch(self, day: date) -> None:
+        """La pantalla está viendo esta fecha: su plan va primero."""
+        with self._cond:
+            self._viewed[day] = time.monotonic()
 
     def wait_idle(self, timeout: float = 60) -> bool:
         with self._cond:
@@ -170,8 +241,17 @@ class Recalculator:
         with self._cond:
             self._stopping = True
             self._cond.notify_all()
+        self._recheck.set()  # corta el cálculo en curso
         self._resume.set()
         self._thread.join(timeout=5)
+
+    def _priority(self, day: date, now: float) -> tuple:
+        """Menor va primero: a la vista (la más reciente), de hoy en adelante, y lo ya pasado."""
+        viewed = self._viewed.get(day)
+        if viewed is not None and now - viewed <= VIEWED_S:
+            return (0, -viewed)
+        days_ahead = (day - date.today()).days
+        return (1, days_ahead) if days_ahead >= 0 else (2, -days_ahead)
 
     def _next_due(self) -> tuple[date, bool] | None:
         """Espera a que venza el agrupamiento de alguna fecha; None si hay que detenerse."""
@@ -181,7 +261,7 @@ class Recalculator:
                 waits = {
                     d: t + self.settings.debounce_s - now for d, (t, _) in self._pending.items()
                 }
-                due = next((d for d, w in waits.items() if w <= 0), None)
+                due = min((d for d, w in waits.items() if w <= 0), key=lambda d: self._priority(d, now), default=None)
                 if due is not None:
                     _, forced = self._pending.pop(due)
                     self._running = due
@@ -213,19 +293,44 @@ class Recalculator:
             row = store.get_plan_row(conn, day)
             if not forced and row is not None and row["inputs_hash"] == current:
                 return
+
+            def outdated() -> bool:
+                """¿Cambiaron los datos de esta fecha (o se apaga el servicio) mientras se calcula?
+                Se consulta muchísimas veces por segundo: solo mira la base cuando llegó una petición."""
+                if not self._recheck.is_set():
+                    return False
+                self._recheck.clear()
+                return self._stopping or inputs_hash(build_problem(conn, day), provider) != current
+
+            self._recheck.clear()
             result, error = None, None
             try:
-                result = run_planning(problem, self.provider, self.geometry)
+                result = run_planning(
+                    problem, self.provider, self.geometry,
+                    control=SearchControl(should_stop=outdated, thorough=forced),
+                    free_plans=self._free_plans, previous=row["result"] if row else None,
+                )
+            except SearchCancelled:
+                self._requeue(day)
+                return
             except (PlanningError, RuntimeError) as e:
                 error = str(e)
             except Exception:
                 logger.exception("error interno al calcular el plan del %s", day)
                 error = "error interno al calcular el plan"
             if inputs_hash(build_problem(conn, day), provider) != current:
-                self.request(day)
+                self._requeue(day)
             elif error is not None:
                 store.save_plan_error(conn, day, current, error)
             else:
                 store.save_plan_result(conn, day, current, result)
         finally:
             conn.close()
+
+    def _requeue(self, day: date) -> None:
+        """Los datos cambiaron durante el cálculo: va de nuevo, sin alargar la espera si la
+        petición del cambio ya está en la cola."""
+        with self._cond:
+            if day not in self._pending and not self._stopping:
+                self._pending[day] = (time.monotonic(), False)
+            self._cond.notify_all()

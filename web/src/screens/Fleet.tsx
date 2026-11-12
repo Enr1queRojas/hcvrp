@@ -6,10 +6,11 @@ const PARAM_FIELDS: { key: keyof Params; label: string; step: number }[] = [
   { key: "diesel_mxn_per_liter", label: "Precio del diésel (MXN por litro)", step: 0.01 },
   { key: "loading_mxn_per_kg", label: "Costo de carga (MXN por kg)", step: 0.01 },
   { key: "shift_minutes", label: "Duración de la jornada (minutos, desde las 9:00)", step: 1 },
-  { key: "service_minutes", label: "Tiempo de entrega por cliente (minutos)", step: 1 },
+  { key: "unload_minutes_per_ton", label: "Descarga en el cliente (minutos por tonelada)", step: 0.5 },
+  { key: "service_minutes", label: "Tiempo fijo por parada, aparte de la descarga (minutos)", step: 1 },
   { key: "reload_minutes", label: "Tiempo de recarga en bodega (minutos)", step: 1 },
   { key: "max_trips_per_vehicle", label: "Viajes máximos por camión", step: 1 },
-  { key: "time_limit_s", label: "Tiempo máximo de cálculo (segundos)", step: 1 },
+  { key: "time_limit_s", label: "Tiempo máximo de cálculo (segundos; Recalcular lo usa completo)", step: 1 },
 ];
 
 export function Fleet({ onChanged }: { onChanged: () => void }) {

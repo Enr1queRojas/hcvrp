@@ -50,6 +50,18 @@ def prepare_clients(raw_path: Path, seed: int = 20261030) -> list[Client]:
     return clients
 
 
+def synthetic_clients(seed: int = 20261030) -> dict[str, Client]:
+    """Los 35 clientes con ubicaciones sintéticas y sin datos reales: para pruebas y mediciones."""
+    lat_min, lat_max, lon_min, lon_max = SYNTHETIC_BOX
+    rng = random.Random(seed)
+    out: dict[str, Client] = {}
+    for code in sorted(KEEP_WITH_ADDRESS | KEEP_PENDING):
+        status = LocationStatus.SINTETICA if code in KEEP_WITH_ADDRESS else LocationStatus.PENDIENTE
+        loc = Location(round(rng.uniform(lat_min, lat_max), 6), round(rng.uniform(lon_min, lon_max), 6))
+        out[code] = Client(code, f"Cliente {code}", f"Dir {code}", loc, status)
+    return out
+
+
 def save_clients(clients: list[Client], path: Path) -> None:
     data = [
         {

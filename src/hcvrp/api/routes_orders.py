@@ -1,6 +1,7 @@
 """Rutas de pedidos, escenarios y bloqueos."""
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 from datetime import date as Date
 
@@ -8,8 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from hcvrp.api import store
 from hcvrp.api.auth import current_user, get_conn
+from hcvrp.api.planning import build_problem
 from hcvrp.api.schemas import LockIO, LockOut, OrderIn, OrderOut, OrderPatch, ScenarioIn, SequenceIn
 from hcvrp.domain import SHIFT_START_MIN, Client, Order, minutes_to_clock
+from hcvrp.manual import manual_violations
+from hcvrp.precheck import points_for
 from hcvrp.scenarios import SCENARIOS, generate_scenario
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
@@ -54,6 +58,21 @@ def _check_truck_fits(conn: sqlite3.Connection, order_id: int, vehicle_id: str) 
         raise HTTPException(
             status_code=422, detail=f"el camión {vehicle_id} no puede entrar con {client.name}"
         )
+
+
+def _check_adjustment(
+    request: Request, conn: sqlite3.Connection, day: Date,
+    locks: dict[str, tuple[str, int | None]], positions: dict[str, int],
+) -> None:
+    """Rechaza al momento, y diciendo la regla, un ajuste a mano que no se puede cumplir."""
+    problem = dataclasses.replace(build_problem(conn, day), locks=locks, positions=positions)
+    try:
+        matrix = request.app.state.recalc.provider.matrix(points_for(problem))
+    except Exception:  # sin servicio de rutas se revisa al menos la capacidad
+        matrix = None
+    broken = manual_violations(problem, matrix)
+    if broken:
+        raise HTTPException(status_code=422, detail="No se puede: " + "; ".join(broken))
 
 
 def _day_of(conn: sqlite3.Connection, order_id: int) -> Date:
@@ -102,6 +121,12 @@ def set_sequence(body: SequenceIn, request: Request, conn: sqlite3.Connection = 
         raise HTTPException(status_code=422, detail=f"los pedidos {missing} no son de ese día")
     for order_id in ids:
         _check_truck_fits(conn, order_id, body.vehicle_id)
+    locks, positions = store.get_locks(conn, body.date), store.get_positions(conn, body.date)
+    for trip_no, trip in enumerate(trips, start=1):
+        for position, order_id in enumerate(trip, start=1):
+            locks[str(order_id)] = (body.vehicle_id, trip_no)
+            positions[str(order_id)] = position
+    _check_adjustment(request, conn, body.date, locks, positions)
     store.set_sequence(conn, body.vehicle_id, trips)
     request.app.state.on_change(body.date)
 
@@ -173,6 +198,10 @@ def set_lock(
     if body.trip_no is not None and body.trip_no > max_trips:
         raise HTTPException(status_code=422, detail=f"el viaje debe estar entre 1 y {max_trips}")
     _check_truck_fits(conn, order_id, body.vehicle_id)
+    locks, positions = store.get_locks(conn, day), store.get_positions(conn, day)
+    locks[str(order_id)] = (body.vehicle_id, body.trip_no)
+    positions.pop(str(order_id), None)
+    _check_adjustment(request, conn, day, locks, positions)
     store.set_lock(conn, order_id, body.vehicle_id, body.trip_no)
     request.app.state.on_change(day)
     return body

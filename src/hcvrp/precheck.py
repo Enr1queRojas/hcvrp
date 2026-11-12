@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from hcvrp.domain import Location, Order, Problem, Unserved, UnservedReason, puesta_amounts
+from hcvrp.domain import (
+    Client, Location, Order, Params, Problem, Unserved, UnservedReason, puesta_amounts,
+)
 from hcvrp.geo.matrix import Matrix
 from hcvrp.schedule import service_bounds
 
@@ -77,6 +79,32 @@ def _check_locks(problem: Problem, merged: list[Order]) -> None:
             raise ValueError(f"position on order {order_id!r} without a (vehicle, trip) lock")
 
 
+def alone_reason(
+    order: Order, client: Client, params: Params, matrix: Matrix, kg: int | None = None
+) -> UnservedReason | None:
+    """Por qué no cabe una entrega de `kg` (por omisión, el pedido completo) ni yendo directo
+    desde la bodega; None si cabe. La descarga dura según los kilos, así que un pedido grande
+    puede no caber en el horario del cliente o en la jornada aunque su puesta sí."""
+    delivered = order.kg if kg is None else kg
+    earliest, latest = service_bounds(order, client, params, delivered)
+    start = max(matrix.minutes("DEPOT", client.code), earliest)
+    if latest is not None and start > latest:
+        return UnservedReason.FUERA_HORARIO_CLIENTE
+    if start + params.service_time(delivered) + matrix.minutes(client.code, "DEPOT") > params.shift_minutes:
+        return UnservedReason.NO_CABE_JORNADA
+    return None
+
+
+def _deliverable_sizes(problem: Problem, order: Order, client: Client, fits: list[int]) -> list[int]:
+    """Kilos que se le pueden llevar en una visita, de mayor a menor: el pedido completo y, si el
+    cliente tiene puesta y el pedido no está fijado, sus partes. Solo los que caben en algún
+    camión que puede entrar (sin camiones disponibles no hay contra qué comparar)."""
+    sizes = [order.kg]
+    if client.puesta and order.order_id not in problem.locks:
+        sizes += puesta_amounts(order.kg)
+    return [kg for kg in sizes if not fits or kg <= max(fits)]
+
+
 def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserved]]:
     """Separa los pedidos fusionados en (planeables, no servidos por inviables)."""
     merged = merge_orders(problem.orders)
@@ -96,27 +124,16 @@ def precheck(problem: Problem, matrix: Matrix) -> tuple[list[Order], list[Unserv
             reason = UnservedReason.SIN_COORDENADAS
         elif available and not fits:
             reason = UnservedReason.NINGUN_CAMION_ENTRA
-        elif fits and o.kg > max(fits) and not (
-            client.puesta and o.order_id not in problem.locks
-            and any(a <= max(fits) for a in puesta_amounts(o.kg))
-        ):
-            # Con puesta, un pedido más grande que cualquier camión todavía puede llevarse en parte.
+        elif not (sizes := _deliverable_sizes(problem, o, client, fits)):
             reason = UnservedReason.EXCEDE_CAPACIDAD
-        elif (
-            (bounds := service_bounds(o, client, params))[1] is not None
-            and max(matrix.minutes("DEPOT", client.code), bounds[0]) > bounds[1]
-        ):
-            reason = UnservedReason.FUERA_HORARIO_CLIENTE
-        elif (
-            max(matrix.minutes("DEPOT", client.code), bounds[0])
-            + params.service_minutes
-            + matrix.minutes(client.code, "DEPOT")
-            > params.shift_minutes
-        ):
-            reason = UnservedReason.NO_CABE_JORNADA
         else:
-            planeable.append(o)
-            continue
+            # Basta con que quepa alguna forma de entregarlo; si ninguna, el motivo es el de la
+            # más grande (el pedido completo, o su mayor puesta si excede a los camiones).
+            reasons = [alone_reason(o, client, params, matrix, kg) for kg in sizes]
+            if None in reasons:
+                planeable.append(o)
+                continue
+            reason = reasons[0]
         unserved.append(Unserved(o.order_id, reason))
     for u in unserved:
         if u.order_id in problem.locks:

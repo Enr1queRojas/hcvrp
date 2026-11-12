@@ -5,9 +5,26 @@ from hcvrp.schedule import build_trip, build_vehicle_plan, summarize
 
 
 def test_build_trip_times_and_km(tiny_matrix):
+    # La descarga va por tonelada (15 min/t): 3 t tardan 45 min y 4 t tardan 60.
     t = build_trip(1, 0, [Order("o1", "A", 3000), Order("o2", "B", 4000)], tiny_matrix, Params())
+    assert [(s.arrival_min, s.departure_min) for s in t.stops] == [(10, 55), (70, 130)]
+    assert t.end_min == 150 and t.km == 19 and t.kg == 7000
+
+
+def test_service_time_is_fixed_part_plus_unloading_by_ton():
+    assert Params().service_time(1_000) == 15 and Params().service_time(4_000) == 60
+    assert Params().service_time(6_900) == 104  # 103.5 se redondea hacia arriba
+    assert Params().service_time(1) == 1
+    assert Params(service_minutes=10).service_time(2_000) == 40
+    assert Params(service_minutes=20, unload_minutes_per_ton=0).service_time(15_000) == 20
+    assert Params(unload_minutes_per_ton=12.5).service_time(2_000) == 25
+
+
+def test_build_trip_with_only_a_fixed_stop_time(tiny_matrix):
+    flat = Params(service_minutes=20, unload_minutes_per_ton=0)
+    t = build_trip(1, 0, [Order("o1", "A", 3000), Order("o2", "B", 4000)], tiny_matrix, flat)
     assert [(s.arrival_min, s.departure_min) for s in t.stops] == [(10, 30), (45, 65)]
-    assert t.end_min == 85 and t.km == 19 and t.kg == 7000
+    assert t.end_min == 85
 
 
 def test_second_trip_starts_after_reload(tiny_matrix):

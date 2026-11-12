@@ -177,7 +177,7 @@ tfoot th { color: var(--ink); font-size: 1rem; border-bottom: 0; }
 .trip-block th:nth-child(3) { width: 7rem; }
 .trip-block th:nth-child(4) { width: 6.5rem; }
 .trip-block th:nth-child(5) { width: 4.5rem; }
-.trip-block th:nth-child(6) { width: 22rem; }
+.trip-block th:nth-child(6) { width: 11rem; }
 .assign { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: center; }
 .assign select { width: 9.5rem; min-height: 2rem; padding: 0.125rem 0.25rem; font-size: 0.875rem; }
 .locked { font-weight: 500; font-size: 0.9375rem; white-space: nowrap; }

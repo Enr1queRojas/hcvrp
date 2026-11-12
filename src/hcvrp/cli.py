@@ -18,7 +18,7 @@ from hcvrp.solver import solve
 REASONS_ES = {
     "excede_capacidad": "excede la capacidad de todos los camiones",
     "no_cabe_jornada": "no cabe en la jornada",
-    "fuera_horario_cliente": "no se alcanza dentro del horario del cliente",
+    "fuera_horario_cliente": "no cabe dentro del horario en que recibe el cliente",
     "ningun_camion_entra": "ningún camión disponible puede entrar con el cliente",
     "puesta_parcial": "puesta: hoy se entregó una parte, el resto pasa a otro día",
     "sin_coordenadas": "cliente sin coordenadas",

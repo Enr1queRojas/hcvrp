@@ -79,6 +79,17 @@ def test_params_roundtrip_and_bounds(client):
     assert client.put("/api/params", json={**p, "time_limit_s": 0}).status_code == 422
 
 
+def test_unload_rate_is_a_parameter(client):
+    p = client.get("/api/params").json()
+    assert (p["unload_minutes_per_ton"], p["service_minutes"]) == (15.0, 0)
+    assert client.put("/api/params", json={**p, "unload_minutes_per_ton": 12.5}).status_code == 200
+    assert client.get("/api/params").json()["unload_minutes_per_ton"] == 12.5
+    r = client.put("/api/params", json={**p, "unload_minutes_per_ton": -1})
+    assert r.status_code == 422 and "por tonelada" in r.json()["detail"]
+    r = client.put("/api/params", json={**p, "service_minutes": 500})
+    assert r.status_code == 422 and "fijo por parada" in r.json()["detail"]
+
+
 def test_catalog_writes_notify_all_dates(client):
     calls = []
     client.app.state.on_change = calls.append

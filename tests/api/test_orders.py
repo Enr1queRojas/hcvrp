@@ -67,7 +67,7 @@ def test_patch_and_delete_order(client):
 
 
 def test_scenarios_listed(client):
-    assert client.get("/api/scenarios").json() == ["ligero", "normal", "pesado", "inviable"]
+    assert client.get("/api/scenarios").json() == ["ligero", "promedio", "normal", "pesado", "inviable"]
 
 
 def test_load_scenario_replaces_day(client, clients):
@@ -212,3 +212,25 @@ def test_cannot_lock_on_truck_that_does_not_fit(client):
     r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V2", "trips": [[o["id"]]]})
     assert r.status_code == 422 and "no puede entrar" in r.json()["detail"]
     assert client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V1"}).status_code == 200
+
+
+def test_impossible_sequence_is_rejected_at_once_with_the_rule(client):
+    recalc = client.app.state.recalc
+    a = client.post("/api/orders", json={"date": D, "client_code": "AARON", "kg": 7000}).json()
+    b = client.post("/api/orders", json={"date": D, "client_code": "BETO", "kg": 8000}).json()
+    recalc.wait_idle(60)
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V1", "trips": [[a["id"], b["id"]]]})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "viaje 1 de V1 llevaría 15,000 kg" in detail and "10,000 kg" in detail
+    # No se guardó nada: el plan sigue bien y los pedidos siguen libres.
+    assert all(o["lock"] is None for o in client.get(f"/api/orders?date={D}").json())
+    r = client.put("/api/orders/sequence", json={"date": D, "vehicle_id": "V1", "trips": [[a["id"]], [b["id"]]]})
+    assert r.status_code == 204
+
+
+def test_lock_to_a_truck_too_small_is_rejected_with_the_rule(client):
+    o = client.post("/api/orders", json={"date": D, "client_code": "AARON", "kg": 12000}).json()
+    r = client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V1"})
+    assert r.status_code == 422 and "no cabe en V1" in r.json()["detail"]
+    assert client.put(f"/api/orders/{o['id']}/lock", json={"vehicle_id": "V2"}).status_code == 200

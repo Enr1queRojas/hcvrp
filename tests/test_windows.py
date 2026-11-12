@@ -85,7 +85,7 @@ def test_wait_is_reported(problem_for):
     assert validate(wp, plan, m) == []
     (stop,) = _stops(plan).values()
     assert stop.arrival_min == 300 and stop.wait_min > 0
-    assert stop.departure_min == 300 + wp.params.service_minutes
+    assert stop.departure_min == 300 + wp.params.service_time(stop.kg)
 
 
 def test_impossible_window_delivers_late_instead_of_dropping(problem_for):
@@ -100,18 +100,31 @@ def test_impossible_window_delivers_late_instead_of_dropping(problem_for):
     assert _served_kg(plan) == _served_kg(base)
 
 
-def test_many_windows_never_cost_kilos(problem_for):
-    p = problem_for("pesado")
-    base, _ = solve(p, HaversineProvider())
-    # Un tercio de los pedidos con horarios estrechos y encontrados.
-    windows = {
+def _narrow_windows(problem):
+    """Un tercio de los pedidos con horarios estrechos y encontrados."""
+    return {
         o.order_id: ((i % 4) * 90, (i % 4) * 90 + 60)
-        for i, o in enumerate(p.orders) if i % 3 == 0
+        for i, o in enumerate(problem.orders) if i % 3 == 0
     }
-    wp = _with_windows(p, windows)
+
+
+def test_many_windows_never_cost_kilos(problem_for):
+    p = problem_for("ligero")  # con holgura en la jornada, los horarios se acomodan sin dejar kilos
+    base, _ = solve(p, HaversineProvider())
+    wp = _with_windows(p, _narrow_windows(p))
     plan, m = solve(wp, HaversineProvider())
     assert validate(wp, plan, m) == []
-    assert _served_kg(plan) == _served_kg(base)
+    assert _served_kg(plan) == _served_kg(base) == sum(o.kg for o in p.orders)
+
+
+def test_windows_on_a_saturated_day_stay_valid(problem_for):
+    p = problem_for("pesado")
+    wp = _with_windows(p, _narrow_windows(p))
+    plan, m = solve(wp, HaversineProvider())
+    assert validate(wp, plan, m) == []
+    # Un "no antes de" nunca se rompe, ni cuando la jornada no alcanza para todo.
+    for stop in _stops(plan).values():
+        assert stop.window_start is None or stop.arrival_min >= stop.window_start
 
 
 def test_window_start_after_shift_is_unservable(problem_for):
@@ -153,11 +166,24 @@ def test_client_opening_is_firm(problem_for):
 def test_client_closing_is_firm(problem_for):
     p = problem_for("ligero")
     o = p.orders[0]
-    cp = _with_client_hours(p, o.client_code, 9 * 60, 10 * 60 + 30)  # cierra a las 10:30
+    _, m0 = solve(replace(p, orders=[o]), HaversineProvider())
+    # Cierra 20 min después de lo mínimo para llegar directo y descargar todo.
+    closes = m0.minutes("DEPOT", o.client_code) + p.params.service_time(o.kg) + 20
+    cp = _with_client_hours(p, o.client_code, 9 * 60, 9 * 60 + closes)
     plan, m = solve(cp, HaversineProvider())
     assert validate(cp, plan, m) == []
     stop = _stops(plan).get(o.order_id)
-    assert stop is not None and stop.departure_min <= 90  # termina de entregar antes de cerrar
+    assert stop is not None and stop.departure_min <= closes  # termina de descargar antes de cerrar
+
+
+def test_unloading_longer_than_client_hours_goes_to_another_day(problem_for):
+    p = problem_for("ligero")
+    o = p.orders[0]
+    assert p.params.service_time(o.kg) > 90
+    cp = _with_client_hours(p, o.client_code, 9 * 60, 10 * 60 + 30)  # cierra a las 10:30
+    plan, m = solve(cp, HaversineProvider())
+    assert validate(cp, plan, m) == []
+    assert {u.order_id: u.reason for u in plan.unserved}[o.order_id] == UnservedReason.FUERA_HORARIO_CLIENTE
 
 
 def test_unreachable_before_closing_goes_to_another_day(problem_for):

@@ -77,8 +77,8 @@ def test_lock_diff_not_negative_when_same_kg(conn, monkeypatch):
     # Con tiempo limitado, el "óptimo" sin bloqueos puede salir más caro que el plan bloqueado.
     real_solve = planning.solve
 
-    def solve(problem, provider):
-        plan, matrix = real_solve(problem, provider)
+    def solve(problem, provider, control=None, previous=None):
+        plan, matrix = real_solve(problem, provider, control, previous)
         return (plan if problem.locks else replace(plan, cost_mxn=plan.cost_mxn + 1000)), matrix
 
     monkeypatch.setattr(planning, "solve", solve)

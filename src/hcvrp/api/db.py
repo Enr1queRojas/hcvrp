@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -73,7 +74,23 @@ def connect(path: Path) -> sqlite3.Connection:
     _migrate_locks(conn)
     _migrate_order_windows(conn)
     _migrate_client_hours(conn)
+    _migrate_unload_rate(conn)
     return conn
+
+
+def _migrate_unload_rate(conn: sqlite3.Connection) -> None:
+    """BD anteriores: la entrega eran minutos fijos por parada, sin importar los kilos. Ahora la
+    descarga va por tonelada y ese tiempo fijo arranca en 0 (se ajusta en Flota y parámetros)."""
+    row = conn.execute("SELECT json FROM params WHERE id = 1").fetchone()
+    if row is None:
+        return
+    params = json.loads(row["json"])
+    if "unload_minutes_per_ton" in params:
+        return
+    params["unload_minutes_per_ton"] = 15.0
+    params["service_minutes"] = 0
+    with conn:
+        conn.execute("UPDATE params SET json = ? WHERE id = 1", (json.dumps(params),))
 
 
 def _migrate_client_hours(conn: sqlite3.Connection) -> None:

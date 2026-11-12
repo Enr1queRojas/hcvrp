@@ -88,10 +88,24 @@ prefijo, y no debe hacerlo: el servidor ya atiende todo bajo `/rutas`.
 La web usa rutas relativas, así que la misma compilación sirve en la raíz o bajo
 el prefijo; `/rutas` sin diagonal final redirige a `/rutas/`.
 
+## Cómo calcula
+
+- **Descarga:** cada entrega dura según sus kilos (15 min por tonelada, ajustable en *Flota y
+  parámetros*, donde también hay un tiempo fijo por parada). Por eso un pedido grande ocupa buena
+  parte de la jornada de un camión.
+- **Rápido al editar:** el plan se recalcula solo con cada cambio y se detiene en cuanto deja de
+  mejorar (unos 2 s en un día promedio de 14 entregas y 55 t). Si quedan kilos fuera insiste más.
+- **A fondo con Recalcular:** el botón usa todo el *Tiempo máximo de cálculo*. Conviene al
+  terminar de capturar, sobre todo en días muy cargados.
+
 ## Desarrollo
 
 ```bash
 .venv/Scripts/python -m pytest -q      # motor y API
+.venv/Scripts/python -m hcvrp.bench    # mide el motor en días de prueba: kilos, costo y segundos
 npm --prefix web test                  # lógica de la web
 npm --prefix web run dev               # web con recarga, usa la API en :8000
 ```
+
+`python -m hcvrp.bench --json antes.json` guarda una corrida; después de cambiar el motor,
+`--compare antes.json` muestra la diferencia caso por caso.

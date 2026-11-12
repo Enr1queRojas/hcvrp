@@ -66,11 +66,14 @@ def validate(problem: Problem, plan: Plan, matrix) -> list[str]:
                 for s in trip.stops:
                     o = orders.get(s.order_id)
                     reached = t + matrix.minutes(prev, s.client_code)
+                    # La descarga y el cierre del cliente cuentan con los kilos que se entregan
+                    # (en puesta, solo una parte del pedido).
                     earliest, latest = (
-                        service_bounds(o, problem.clients.get(s.client_code), params) if o else (0, None)
+                        service_bounds(o, problem.clients.get(s.client_code), params, s.kg)
+                        if o else (0, None)
                     )
                     arrival = max(reached, earliest)
-                    dep = arrival + params.service_minutes
+                    dep = arrival + params.service_time(s.kg)
                     if latest is not None and arrival > latest:
                         out.append(
                             f"{tag}: la parada {s.order_id} se entrega fuera del horario del cliente "
